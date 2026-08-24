@@ -7,7 +7,7 @@ from torch import nn
 
 from dsrnn.nn.cells.base import DSRNNCell
 from dsrnn.nn.functional import Implementation
-from dsrnn.nn.router import RouterConfig
+from dsrnn.nn.router import RouterConfig, RouterOutput
 
 
 class DSLSTMCell(DSRNNCell):
@@ -57,13 +57,16 @@ class DSLSTMCell(DSRNNCell):
 
     def forward(self,
                 x: torch.Tensor,
-                hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+                hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+                routing: Optional[Tuple[RouterOutput, RouterOutput]] = None
                 ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """Run one cell step.
 
         Args:
             x: Current input of shape (B, input_size).
             hx: Optional (h, c) state pair, each of shape (B, hidden_size).
+            routing: Optional precomputed (input_routing, hidden_routing) pair.
+                If None, routing is computed from x.
 
         Returns:
             A (h_new, (h_new, c_new)) pair.
@@ -75,19 +78,16 @@ class DSLSTMCell(DSRNNCell):
         else:
             h, c = hx
 
-        input_routing, hidden_routing = self.compute_routing(x)
-        w_ih = self.weight_ih.view(4, self.hidden_size, self.input_size)
-        w_hh = self.weight_hh.view(4, self.hidden_size, self.hidden_size)
+        input_routing, hidden_routing = self._resolve_routing(x, routing)
 
-        gates = []
-        for i in range(4):
-            bias_ih = None if self.bias_ih is None else self.bias_ih[i * self.hidden_size:(i + 1) * self.hidden_size]
-            bias_hh = None if self.bias_hh is None else self.bias_hh[i * self.hidden_size:(i + 1) * self.hidden_size]
-            i2h = self.masked_linear(x, input_routing.mask, input_routing.idx, w_ih[i], bias=bias_ih)
-            h2h = self.masked_linear(h, hidden_routing.mask, hidden_routing.idx, w_hh[i], bias=bias_hh)
-            gates.append(i2h + h2h)
+        # All four gates share the input and hidden masks, so the input- and
+        # hidden-side transforms are each fused into a single masked matmul.
+        i2h = self.masked_linear(x, input_routing.mask, input_routing.idx, self.weight_ih,
+                                 bias=self.bias_ih)
+        h2h = self.masked_linear(h, hidden_routing.mask, hidden_routing.idx, self.weight_hh,
+                                 bias=self.bias_hh)
 
-        i, f, g, o = gates
+        i, f, g, o = (i2h + h2h).chunk(4, dim=-1)
         i = torch.sigmoid(i)
         f = torch.sigmoid(f)
         g = torch.tanh(g)

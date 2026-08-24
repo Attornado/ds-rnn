@@ -74,13 +74,40 @@ def topk_mask(scores: torch.Tensor,
     return hard, idx
 
 
+def gathered_matmul(x: torch.Tensor,
+                    mask: torch.Tensor,
+                    weight: torch.Tensor,
+                    idx: torch.Tensor,
+                    bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """Compute a gathered masked matmul with standard autograd.
+
+    Gradient reaches only the gathered (selected) channels. For the "ste"
+    backward rule, use gathered_recurrent_matmul instead.
+
+    Args:
+        x: Input activations of shape (B, H).
+        mask: Channel mask of shape (B, H).
+        weight: Shared weight matrix of shape (O, H).
+        idx: Active channel indices of shape (B, k).
+        bias: Optional bias of shape (O,).
+
+    Returns:
+        Output tensor of shape (B, O).
+    """
+    x_active = x.gather(1, idx) * mask.gather(1, idx)
+    weight_active = (weight.unsqueeze(0)
+                     .expand(x.size(0), -1, -1)
+                     .gather(2, idx.unsqueeze(1).expand(-1, weight.size(0), -1)))
+    output = torch.bmm(weight_active, x_active.unsqueeze(-1)).squeeze(-1)
+    return output if bias is None else output + bias
+
+
 class GatheredRecurrentMatmul(torch.autograd.Function):
     """Gathered column matmul with dense-equivalent mask gradients.
 
-    The forward pass gathers the active input channels and weight columns and
-    applies a batched dense matmul. The backward pass contracts the upstream
-    gradient with the full weight matrix, so every mask entry receives
-    gradient even though only the selected columns were gathered.
+    The backward pass contracts the upstream gradient with the full weight
+    matrix, so every mask entry receives gradient even though only the
+    selected columns were gathered. Required for the "ste" backward rule.
     """
 
     @staticmethod
@@ -101,13 +128,7 @@ class GatheredRecurrentMatmul(torch.autograd.Function):
         Returns:
             Output tensor of shape (B, O).
         """
-        x_active = x.gather(1, idx) * mask.gather(1, idx)
-        weight_active = (
-            weight.unsqueeze(0)
-            .expand(x.size(0), -1, -1)
-            .gather(2, idx.unsqueeze(1).expand(-1, weight.size(0), -1))
-        )
-        output = torch.bmm(weight_active, x_active.unsqueeze(-1)).squeeze(-1)
+        output = gathered_matmul(x, mask, weight, idx)
         ctx.save_for_backward(x, mask, weight)
         return output
 
@@ -136,7 +157,7 @@ def gathered_recurrent_matmul(x: torch.Tensor,
                               weight: torch.Tensor,
                               idx: torch.Tensor,
                               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Compute a masked matmul by gathering active weight columns.
+    """Compute a gathered masked matmul with dense-equivalent mask gradients.
 
     Args:
         x: Input activations of shape (B, H).
@@ -176,7 +197,8 @@ def masked_matmul(x: torch.Tensor,
                   weight: torch.Tensor,
                   idx: Optional[torch.Tensor] = None,
                   bias: Optional[torch.Tensor] = None,
-                  implementation: Implementation = "gathered") -> torch.Tensor:
+                  implementation: Implementation = "gathered",
+                  backward: BackwardRule = "ste") -> torch.Tensor:
     """Dispatch between gathered and dense masked matmul implementations.
 
     Args:
@@ -186,6 +208,8 @@ def masked_matmul(x: torch.Tensor,
         idx: Active channel indices of shape (B, k). Required for "gathered".
         bias: Optional bias of shape (O,).
         implementation: "gathered" or "dense".
+        backward: Backward rule. For "gathered", "ste" uses the custom
+            autograd Function and "selected_only" uses the plain gathered path.
 
     Returns:
         Output tensor of shape (B, O).
@@ -195,5 +219,7 @@ def masked_matmul(x: torch.Tensor,
     if implementation == "gathered":
         if idx is None:
             raise ValueError("idx is required for the gathered implementation.")
-        return gathered_recurrent_matmul(x, mask, weight, idx, bias=bias)
+        if backward == "ste":
+            return gathered_recurrent_matmul(x, mask, weight, idx, bias=bias)
+        return gathered_matmul(x, mask, weight, idx, bias=bias)
     raise ValueError(f"Unknown implementation '{implementation}'.")

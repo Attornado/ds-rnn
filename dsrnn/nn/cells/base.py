@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 
-from dsrnn.nn.functional import Implementation, masked_matmul
+from dsrnn.nn.functional import BackwardRule, Implementation, masked_matmul
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
 
 
@@ -16,6 +16,8 @@ class DSRNNCell(nn.Module):
     Holds the input-channel and hidden-channel routers and computes the
     per-timestep channel masks. Subclasses implement the gated state update.
     """
+
+    supports_precompute: bool = True
 
     def __init__(self,
                  input_size: int,
@@ -48,6 +50,7 @@ class DSRNNCell(nn.Module):
         self.hidden_size = hidden_size
         self.implementation = implementation
         self.share_context_projection = share_context_projection
+        self._backward: BackwardRule = router_config.backward
 
         if share_context_projection:
             if router_config.context_dim is None:
@@ -78,6 +81,30 @@ class DSRNNCell(nn.Module):
         self.last_hidden_routing = self.hidden_router(context)
         return self.last_input_routing, self.last_hidden_routing
 
+    def compute_routing_batched(self, x: torch.Tensor) -> Tuple[RouterOutput, RouterOutput]:
+        """Compute routing for a flattened batch of inputs.
+
+        Args:
+            x: Flattened inputs of shape (N, input_size), e.g. N = B * T.
+
+        Returns:
+            The (input_routing, hidden_routing) pair over all N inputs.
+        """
+        context = self.context_proj(x) if self.context_proj is not None else x
+        input_routing = self.input_router(context)
+        hidden_routing = self.hidden_router(context)
+        return input_routing, hidden_routing
+
+    def _resolve_routing(self,
+                         x: torch.Tensor,
+                         routing: Optional[Tuple[RouterOutput, RouterOutput]]
+                         ) -> Tuple[RouterOutput, RouterOutput]:
+        """Return the given routing or compute it from x."""
+        if routing is None:
+            return self.compute_routing(x)
+        self.last_input_routing, self.last_hidden_routing = routing
+        return routing
+
     def masked_linear(self,
                       x: torch.Tensor,
                       mask: torch.Tensor,
@@ -96,7 +123,8 @@ class DSRNNCell(nn.Module):
         Returns:
             Output tensor of shape (B, O).
         """
-        return masked_matmul(x, mask, weight, idx=idx, bias=bias, implementation=self.implementation)
+        return masked_matmul(x, mask, weight, idx=idx, bias=bias,
+                             implementation=self.implementation, backward=self._backward)
 
     def reset_parameters(self) -> None:
         """Reset the routers and the shared context projection, if present."""

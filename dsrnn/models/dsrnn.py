@@ -8,15 +8,17 @@ from torch import nn
 
 from dsrnn.nn.cells.dsgru import DSGRUCell
 from dsrnn.nn.cells.dslstm import DSLSTMCell
+from dsrnn.nn.cells.dsltc import DSLTCCell
 from dsrnn.nn.cells.gru import GRUCell
 from dsrnn.nn.cells.lstm import LSTMCell
 from dsrnn.nn.functional import Implementation
-from dsrnn.nn.router import RouterConfig
+from dsrnn.nn.router import RouterConfig, RouterOutput
 
 # name -> (cell class, whether the constructor takes a router_config)
 _CELL_TYPES: Dict[str, Tuple[Type[nn.Module], bool]] = {
     "dslstm": (DSLSTMCell, True),
     "dsgru": (DSGRUCell, True),
+    "dsltc": (DSLTCCell, True),
     "lstm": (LSTMCell, False),
     "gru": (GRUCell, False),
 }
@@ -34,6 +36,19 @@ def register_cell_type(name: str,
         dynamic_sparse: Whether the cell constructor takes a router_config.
     """
     _CELL_TYPES[name] = (cell_cls, dynamic_sparse)
+
+
+def _slice_routing(routing: RouterOutput,
+                   t: int,
+                   seq_len: int,
+                   batch_size: int) -> RouterOutput:
+    """Select one timestep from a sequence-batched RouterOutput."""
+    return RouterOutput(
+        mask=routing.mask.view(seq_len, batch_size, -1)[t],
+        idx=routing.idx.view(seq_len, batch_size, -1)[t],
+        scores=routing.scores.view(seq_len, batch_size, -1)[t],
+        logits=routing.logits.view(seq_len, batch_size, -1)[t],
+    )
 
 
 class DSRNN(nn.Module):
@@ -56,6 +71,7 @@ class DSRNN(nn.Module):
                  dropout: float = 0.0,
                  batch_first: bool = True,
                  output_size: Optional[int] = None,
+                 precompute_routing: bool = False,
                  **cell_kwargs):
         """Initialize the model.
 
@@ -68,13 +84,17 @@ class DSRNN(nn.Module):
                 must equal input_size (adjusted per layer automatically).
             num_layers: Number of stacked layers.
             implementation: Masked matmul implementation for dynamic-sparse
-                cells, "gathered" or "dense".
+                cells, "gathered" or "dense". DSLTCCell currently requires
+                "dense".
             share_context_projection: If True, each cell shares one context
                 projection between its two routers.
             dropout: Dropout probability between layers.
             batch_first: If True, input and output are (B, T, *).
             output_size: Optional output projection size. If None, the model
             returns hidden states.
+            precompute_routing: If True, compute the channel masks for the
+                whole sequence with one batched router call per layer instead
+                of once per timestep. Only affects dynamic-sparse cells.
             **cell_kwargs: Additional keyword arguments for the cell
                 constructors.
         """
@@ -91,6 +111,7 @@ class DSRNN(nn.Module):
         self.num_layers = num_layers
         self.batch_first = batch_first
         self.output_size = output_size
+        self.precompute_routing = precompute_routing
 
         cells = []
         for layer in range(num_layers):
@@ -130,7 +151,7 @@ class DSRNN(nn.Module):
         """
         if self.batch_first:
             x = x.transpose(0, 1)
-        seq_len = x.size(0)
+        seq_len, batch_size = x.size(0), x.size(1)
 
         states = [None] * self.num_layers if hx is None else list(hx)
         layer_input = x
@@ -138,9 +159,20 @@ class DSRNN(nn.Module):
         for layer, cell in enumerate(self.cells):
             state = states[layer]
             outputs = []
-            for t in range(seq_len):
-                out, state = cell(layer_input[t], state)
-                outputs.append(out)
+
+            if self.precompute_routing and getattr(cell, "supports_precompute", False):
+                flat = layer_input.reshape(seq_len * batch_size, layer_input.size(-1))
+                routing = cell.compute_routing_batched(flat)
+                for t in range(seq_len):
+                    routing_t = (_slice_routing(routing[0], t, seq_len, batch_size),
+                                 _slice_routing(routing[1], t, seq_len, batch_size))
+                    out, state = cell(layer_input[t], state, routing=routing_t)
+                    outputs.append(out)
+            else:
+                for t in range(seq_len):
+                    out, state = cell(layer_input[t], state)
+                    outputs.append(out)
+
             layer_output = torch.stack(outputs, dim=0)
             final_states.append(state)
             if self.dropout is not None and layer < self.num_layers - 1:
