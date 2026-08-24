@@ -12,7 +12,7 @@ from dsrnn.nn.cells.dsltc import DSLTCCell
 from dsrnn.nn.cells.gru import GRUCell
 from dsrnn.nn.cells.lstm import LSTMCell
 from dsrnn.nn.functional import Implementation
-from dsrnn.nn.router import RouterConfig, RouterOutput
+from dsrnn.nn.router import RouterConfig
 
 # name -> (cell class, whether the constructor takes a router_config)
 _CELL_TYPES: Dict[str, Tuple[Type[nn.Module], bool]] = {
@@ -36,19 +36,6 @@ def register_cell_type(name: str,
         dynamic_sparse: Whether the cell constructor takes a router_config.
     """
     _CELL_TYPES[name] = (cell_cls, dynamic_sparse)
-
-
-def _slice_routing(routing: RouterOutput,
-                   t: int,
-                   seq_len: int,
-                   batch_size: int) -> RouterOutput:
-    """Select one timestep from a sequence-batched RouterOutput."""
-    return RouterOutput(
-        mask=routing.mask.view(seq_len, batch_size, -1)[t],
-        idx=routing.idx.view(seq_len, batch_size, -1)[t],
-        scores=routing.scores.view(seq_len, batch_size, -1)[t],
-        logits=routing.logits.view(seq_len, batch_size, -1)[t],
-    )
 
 
 class DSRNN(nn.Module):
@@ -162,10 +149,14 @@ class DSRNN(nn.Module):
 
             if self.precompute_routing and getattr(cell, "supports_precompute", False):
                 flat = layer_input.reshape(seq_len * batch_size, layer_input.size(-1))
-                routing = cell.compute_routing_batched(flat)
+                input_routing, hidden_routing = cell.compute_routing_batched(flat)
+                # Pre-slice into (T, B, *) once; per-step indexing is a cheap view.
+                mask_x = input_routing.mask.view(seq_len, batch_size, -1)
+                idx_x = input_routing.idx.view(seq_len, batch_size, -1)
+                mask_h = hidden_routing.mask.view(seq_len, batch_size, -1)
+                idx_h = hidden_routing.idx.view(seq_len, batch_size, -1)
                 for t in range(seq_len):
-                    routing_t = (_slice_routing(routing[0], t, seq_len, batch_size),
-                                 _slice_routing(routing[1], t, seq_len, batch_size))
+                    routing_t = ((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t]))
                     out, state = cell(layer_input[t], state, routing=routing_t)
                     outputs.append(out)
             else:

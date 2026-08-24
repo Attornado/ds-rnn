@@ -5,9 +5,9 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 
-from dsrnn.nn.cells.base import DSRNNCell
+from dsrnn.nn.cells.base import DSRNNCell, RoutingOverride
 from dsrnn.nn.functional import Implementation
-from dsrnn.nn.router import RouterConfig, RouterOutput
+from dsrnn.nn.router import RouterConfig
 
 
 class DSGRUCell(DSRNNCell):
@@ -58,14 +58,13 @@ class DSGRUCell(DSRNNCell):
     def forward(self,
                 x: torch.Tensor,
                 hx: Optional[torch.Tensor] = None,
-                routing: Optional[Tuple[RouterOutput, RouterOutput]] = None
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+                routing: Optional[RoutingOverride] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """Run one cell step.
 
         Args:
             x: Current input of shape (B, input_size).
             hx: Optional hidden state of shape (B, hidden_size).
-            routing: Optional precomputed (input_routing, hidden_routing) pair.
+            routing: Optional precomputed ((mask_x, idx_x), (mask_h, idx_h)).
                 If None, routing is computed from x.
 
         Returns:
@@ -74,18 +73,16 @@ class DSGRUCell(DSRNNCell):
         batch_size = x.size(0)
         h = x.new_zeros(batch_size, self.hidden_size) if hx is None else hx
 
-        input_routing, hidden_routing = self._resolve_routing(x, routing)
+        (mask_x, idx_x), (mask_h, idx_h) = self._resolve_masks(x, routing)
 
         # All three gates share the input mask: one fused input-side matmul.
-        i2h = self.masked_linear(x, input_routing.mask, input_routing.idx, self.weight_ih,
-                                 bias=self.bias_ih)
+        i2h = self.masked_linear(x, mask_x, idx_x, self.weight_ih, bias=self.bias_ih)
         i2h_r, i2h_z, i2h_n = i2h.chunk(3, dim=-1)
 
         # Reset and update gates share the hidden mask: one fused matmul.
         w_hh_rz = self.weight_hh[:2 * self.hidden_size]
         bias_hh_rz = None if self.bias_hh is None else self.bias_hh[:2 * self.hidden_size]
-        h2h_rz = self.masked_linear(h, hidden_routing.mask, hidden_routing.idx, w_hh_rz,
-                                    bias=bias_hh_rz)
+        h2h_rz = self.masked_linear(h, mask_h, idx_h, w_hh_rz, bias=bias_hh_rz)
         h2h_r, h2h_z = h2h_rz.chunk(2, dim=-1)
 
         r = torch.sigmoid(i2h_r + h2h_r)
@@ -94,8 +91,7 @@ class DSGRUCell(DSRNNCell):
         # Candidate gate: the reset gate is fused into the hidden mask.
         w_hh_n = self.weight_hh[2 * self.hidden_size:]
         bias_hh_n = None if self.bias_hh is None else self.bias_hh[2 * self.hidden_size:]
-        h2h_n = self.masked_linear(h, hidden_routing.mask * r, hidden_routing.idx, w_hh_n,
-                                   bias=bias_hh_n)
+        h2h_n = self.masked_linear(h, mask_h * r, idx_h, w_hh_n, bias=bias_hh_n)
         n = torch.tanh(i2h_n + h2h_n)
 
         h_new = (1.0 - z) * n + z * h

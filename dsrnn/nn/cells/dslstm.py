@@ -5,9 +5,9 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 
-from dsrnn.nn.cells.base import DSRNNCell
+from dsrnn.nn.cells.base import DSRNNCell, RoutingOverride
 from dsrnn.nn.functional import Implementation
-from dsrnn.nn.router import RouterConfig, RouterOutput
+from dsrnn.nn.router import RouterConfig
 
 
 class DSLSTMCell(DSRNNCell):
@@ -58,14 +58,14 @@ class DSLSTMCell(DSRNNCell):
     def forward(self,
                 x: torch.Tensor,
                 hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-                routing: Optional[Tuple[RouterOutput, RouterOutput]] = None
+                routing: Optional[RoutingOverride] = None
                 ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """Run one cell step.
 
         Args:
             x: Current input of shape (B, input_size).
             hx: Optional (h, c) state pair, each of shape (B, hidden_size).
-            routing: Optional precomputed (input_routing, hidden_routing) pair.
+            routing: Optional precomputed ((mask_x, idx_x), (mask_h, idx_h)).
                 If None, routing is computed from x.
 
         Returns:
@@ -78,14 +78,12 @@ class DSLSTMCell(DSRNNCell):
         else:
             h, c = hx
 
-        input_routing, hidden_routing = self._resolve_routing(x, routing)
+        (mask_x, idx_x), (mask_h, idx_h) = self._resolve_masks(x, routing)
 
         # All four gates share the input and hidden masks, so the input- and
         # hidden-side transforms are each fused into a single masked matmul.
-        i2h = self.masked_linear(x, input_routing.mask, input_routing.idx, self.weight_ih,
-                                 bias=self.bias_ih)
-        h2h = self.masked_linear(h, hidden_routing.mask, hidden_routing.idx, self.weight_hh,
-                                 bias=self.bias_hh)
+        i2h = self.masked_linear(x, mask_x, idx_x, self.weight_ih, bias=self.bias_ih)
+        h2h = self.masked_linear(h, mask_h, idx_h, self.weight_hh, bias=self.bias_hh)
 
         i, f, g, o = (i2h + h2h).chunk(4, dim=-1)
         i = torch.sigmoid(i)

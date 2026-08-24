@@ -7,6 +7,7 @@ import ncps
 import torch
 from ncps.torch import LTCCell
 
+from dsrnn.nn.cells.base import RoutingOverride
 from dsrnn.nn.functional import Implementation
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
 
@@ -139,12 +140,12 @@ class DSLTCCell(LTCCell):
                     inputs: torch.Tensor,
                     state: torch.Tensor,
                     elapsed_time: float,
-                    input_routing: RouterOutput,
-                    hidden_routing: RouterOutput) -> torch.Tensor:
+                    mask_x: torch.Tensor,
+                    mask_h: torch.Tensor) -> torch.Tensor:
         sensory_w_activation = self.make_positive_fn(self._params["sensory_w"]) * self._sigmoid(
             inputs, self._params["sensory_mu"], self._params["sensory_sigma"])
         if self.use_sensor_dynamic_mask:
-            sensory_w_activation = sensory_w_activation * input_routing.mask.unsqueeze(-1)
+            sensory_w_activation = sensory_w_activation * mask_x.unsqueeze(-1)
         sensory_w_activation = sensory_w_activation * self._params["sensory_sparsity_mask"]
         sensory_rev_activation = sensory_w_activation * self._params["sensory_erev"]
 
@@ -156,7 +157,7 @@ class DSLTCCell(LTCCell):
         v_pre = state
         for _ in range(self._ode_unfolds):
             w_activation = w_param * self._sigmoid(v_pre, self._params["mu"], self._params["sigma"])
-            w_activation = w_activation * self._params["sparsity_mask"] * hidden_routing.mask.unsqueeze(-1)
+            w_activation = w_activation * self._params["sparsity_mask"] * mask_h.unsqueeze(-1)
             rev_activation = w_activation * self._params["erev"]
 
             w_numerator = torch.sum(rev_activation, dim=1) + w_numerator_sensory
@@ -172,16 +173,16 @@ class DSLTCCell(LTCCell):
                 inputs: torch.Tensor,
                 states: torch.Tensor,
                 elapsed_time: float = 1.0,
-                routing: Optional[Tuple[RouterOutput, RouterOutput]] = None
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+                routing: Optional[RoutingOverride] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """Run one cell step.
 
         Args:
             inputs: Current input of shape (B, input_size).
             states: Current state of shape (B, state_size).
             elapsed_time: Elapsed time since the last update.
-            routing: Optional precomputed (input_routing, hidden_routing) pair.
-                If None, routing is computed from the mapped input.
+            routing: Optional precomputed ((mask_x, idx_x), (mask_h, idx_h)).
+                Only the masks are used (dense path). If None, routing is
+                computed from the mapped input.
 
         Returns:
             A (output, next_state) pair. output has shape (B, state_size) when
@@ -190,12 +191,10 @@ class DSLTCCell(LTCCell):
         mapped_inputs = self._map_inputs(inputs)
         if routing is None:
             input_routing, hidden_routing = self.compute_routing(mapped_inputs)
+            mask_x, mask_h = input_routing.mask, hidden_routing.mask
         else:
-            input_routing, hidden_routing = routing
-            self.last_input_routing = input_routing
-            self.last_hidden_routing = hidden_routing
-        next_state = self._ode_solver(mapped_inputs, states, elapsed_time, input_routing,
-                                      hidden_routing)
+            (mask_x, _), (mask_h, _) = routing
+        next_state = self._ode_solver(mapped_inputs, states, elapsed_time, mask_x, mask_h)
         outputs = self._map_outputs(next_state)
         return outputs, next_state
 

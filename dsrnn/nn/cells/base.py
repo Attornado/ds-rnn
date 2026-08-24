@@ -9,6 +9,10 @@ from torch import nn
 from dsrnn.nn.functional import BackwardRule, Implementation, masked_matmul
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
 
+# (mask, idx) pairs for the input and hidden channels
+MaskPair = Tuple[torch.Tensor, torch.Tensor]
+RoutingOverride = Tuple[MaskPair, MaskPair]
+
 
 class DSRNNCell(nn.Module):
     """Base class for dynamic-sparse recurrent cells.
@@ -95,14 +99,25 @@ class DSRNNCell(nn.Module):
         hidden_routing = self.hidden_router(context)
         return input_routing, hidden_routing
 
-    def _resolve_routing(self,
-                         x: torch.Tensor,
-                         routing: Optional[Tuple[RouterOutput, RouterOutput]]
-                         ) -> Tuple[RouterOutput, RouterOutput]:
-        """Return the given routing or compute it from x."""
+    def _resolve_masks(self,
+                       x: torch.Tensor,
+                       routing: Optional[RoutingOverride]) -> RoutingOverride:
+        """Return ((mask_x, idx_x), (mask_h, idx_h)) for this step.
+
+        Computes routing from x when routing is None (storing the RouterOutputs
+        for analysis); otherwise returns the given precomputed masks without
+        storing them.
+
+        Args:
+            x: Current cell input of shape (B, input_size).
+            routing: Optional precomputed ((mask_x, idx_x), (mask_h, idx_h)).
+
+        Returns:
+            The ((mask_x, idx_x), (mask_h, idx_h)) pair.
+        """
         if routing is None:
-            return self.compute_routing(x)
-        self.last_input_routing, self.last_hidden_routing = routing
+            input_routing, hidden_routing = self.compute_routing(x)
+            return (input_routing.mask, input_routing.idx), (hidden_routing.mask, hidden_routing.idx)
         return routing
 
     def masked_linear(self,
