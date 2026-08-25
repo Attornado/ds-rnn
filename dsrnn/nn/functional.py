@@ -102,6 +102,30 @@ def gathered_matmul(x: torch.Tensor,
     return output if bias is None else output + bias
 
 
+def gathered_active_matmul(values: torch.Tensor,
+                           idx: torch.Tensor,
+                           weight: torch.Tensor,
+                           bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """Apply a gathered linear map to already-masked active values.
+
+    Args:
+        values: Active inputs of shape (B, k).
+        idx: Source-channel indices of shape (B, k).
+        weight: Weight matrix of shape (O, I).
+        bias: Optional bias of shape (O,).
+
+    Returns:
+        Output tensor of shape (B, O).
+    """
+    batch_size, k = values.shape
+    out_features = weight.size(0)
+    weight_active = (weight.unsqueeze(0)
+                     .expand(batch_size, out_features, weight.size(1))
+                     .gather(2, idx.unsqueeze(1).expand(-1, out_features, k)))
+    output = torch.bmm(weight_active, values.unsqueeze(-1)).squeeze(-1)
+    return output if bias is None else output + bias
+
+
 class GatheredRecurrentMatmul(torch.autograd.Function):
     """Gathered column matmul with dense-equivalent mask gradients.
 
