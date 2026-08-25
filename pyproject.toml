@@ -16,14 +16,14 @@ keywords = ["recurrent-neural-networks", "dynamic-sparsity", "conditional-comput
 dependencies = [
     "torch>=2.1",
     "numpy>=1.24",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-# Training loops, metrics and CLI for the benchmark experiments.
+# Training loops and metrics for the benchmark experiments.
 experiments = [
     "lightning>=2.2",
     "torchmetrics>=1.3",
-    "jsonargparse[signatures]>=4.27",
 ]
 # Datasets used by the benchmark suites.
 data = [
@@ -34,6 +34,10 @@ data = [
 # Continual learning experiments (Avalanche-managed training loops).
 cl = [
     "avalanche-lib>=0.5",
+]
+# Weight-watcher analysis callbacks.
+ww = [
+    "weightwatcher>=0.7",
 ]
 # Logging (optional; experiments run fine without it).
 wandb = [
