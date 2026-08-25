@@ -88,7 +88,11 @@ class DSGRUCell(DSRNNCell):
 
         w_hh_n = self.weight_hh[2 * self.hidden_size:]
         bias_hh_n = None if self.bias_hh is None else self.bias_hh[2 * self.hidden_size:]
-        h2h_n = gathered_active_matmul(h_active * r, idx_h, w_hh_n, bias_hh_n)
+        # r is defined over all H units; gather it into the source coordinates
+        # of h_active so each active unit is gated by its own reset value,
+        # matching the elementwise mask_h * r in the generic forward.
+        r_active = torch.gather(r, dim=-1, index=idx_h)
+        h2h_n = gathered_active_matmul(h_active * r_active, idx_h, w_hh_n, bias_hh_n)
         h_new = self._update(gates_x, h2h_n, h, r, z)
         return h_new, h_new
 
