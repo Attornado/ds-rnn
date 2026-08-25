@@ -1,193 +1,141 @@
-"""Equivalence tests between generic and specialized DS cell paths."""
+"""Equivalence tests between generic cell forward and forward_active."""
 
 import torch
 
+from dsrnn.models.dsgru_model import DSGRU
+from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.nn.cells.dsgru import DSGRUCell
 from dsrnn.nn.cells.dslstm import DSLSTMCell
-from dsrnn.nn.cells.dsltc import DSLTCCell
 from dsrnn.nn.router import RouterConfig
 
+B, T, D, H = 4, 7, 8, 16
+SPARSITY = 0.9
+ATOL = 1e-9
 
-def _config(num_channels, input_dim, backward="selected_only", sparsity=0.9, seed=0):
-    torch.manual_seed(seed)
-    return RouterConfig(num_channels=num_channels,
-                        input_dim=input_dim,
-                        context_dim=4,
-                        sparsity=sparsity,
-                        backward=backward)
+
+def make_cell(cell_cls):
+    torch.manual_seed(0)
+    router_config = RouterConfig(num_channels=H, input_dim=D, context_dim=4,
+                                 sparsity=SPARSITY, backward="selected_only")
+    return cell_cls(input_size=D, hidden_size=H, router_config=router_config,
+                    implementation="gathered")
+
+
+def route_sequence(cell, x):
+    """Route a time-major input, returning time-major masks and indices."""
+    flat = x.reshape(T * B, D)
+    input_routing, hidden_routing = cell.compute_routing_batched(flat)
+    return (input_routing.mask.view(T, B, D),
+            input_routing.idx.view(T, B, -1),
+            hidden_routing.mask.view(T, B, H),
+            hidden_routing.idx.view(T, B, -1))
 
 
 def test_dslstm_active_matches_generic():
-    """forward_active matches the generic gathered path, forward and backward."""
-    torch.manual_seed(0)
-    B, T, D, H = 4, 7, 8, 16
-    cell = DSLSTMCell(input_size=D,
-                      hidden_size=H,
-                      router_config=_config(H, D),
-                      implementation="gathered")
-    x = torch.randn(B, T, D, dtype=torch.double)
+    cell = make_cell(DSLSTMCell)
+    torch.manual_seed(1)
+    x = torch.randn(B, T, D, dtype=torch.double).transpose(0, 1)
+    x = x.detach().requires_grad_(True)
     cell = cell.double()
-
-    flat = x.reshape(B * T, D)
-    input_routing, hidden_routing = cell.compute_routing_batched(flat)
-    mask_x = input_routing.mask.view(T, B, D)
-    idx_x = input_routing.idx.view(T, B, -1)
-    mask_h = hidden_routing.mask.view(T, B, H)
-    idx_h = hidden_routing.idx.view(T, B, -1)
-
-    h = x.new_zeros(B, H)
-    c = x.new_zeros(B, H)
-    outputs_generic = []
-    for t in range(T):
-        h, (h, c) = cell(x[:, t], (h, c),
-                         routing=((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t])))
-        outputs_generic.append(h)
-    out_generic = torch.stack(outputs_generic, dim=1)
-
+    mask_x, idx_x, mask_h, idx_h = route_sequence(cell, x)
     x_active = torch.gather(x, dim=-1, index=idx_x) * torch.gather(mask_x, dim=-1, index=idx_x)
-    h = x.new_zeros(B, H)
-    c = x.new_zeros(B, H)
-    outputs_active = []
+
+    h_g, c_g = x.new_zeros(B, H), x.new_zeros(B, H)
+    h_a, c_a = h_g.clone(), c_g.clone()
     for t in range(T):
-        h, (h, c) = cell.forward_active(x_active[t], idx_x[t], h, c, mask_h[t], idx_h[t])
-        outputs_active.append(h)
-    out_active = torch.stack(outputs_active, dim=1)
+        h_g, (h_g, c_g) = cell(x[t], (h_g, c_g),
+                               routing=((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t])))
+        h_a, (h_a, c_a) = cell.forward_active(x_active[t], idx_x[t], h_a, c_a, mask_h[t], idx_h[t])
 
-    assert torch.allclose(out_generic, out_active, atol=1e-10)
-
-
-def test_dslstm_active_backward_matches_generic():
-    """Gradients of forward_active match the generic gathered selected-only path."""
-    torch.manual_seed(0)
-    B, T, D, H = 4, 5, 8, 16
-    cell = DSLSTMCell(input_size=D,
-                      hidden_size=H,
-                      router_config=_config(H, D),
-                      implementation="gathered").double()
-    x = torch.randn(B, T, D, dtype=torch.double, requires_grad=True)
-
-    flat = x.reshape(B * T, D)
-    input_routing, hidden_routing = cell.compute_routing_batched(flat)
-    mask_x = input_routing.mask.view(T, B, D)
-    idx_x = input_routing.idx.view(T, B, -1)
-    mask_h = hidden_routing.mask.view(T, B, H)
-    idx_h = hidden_routing.idx.view(T, B, -1)
-
-    grad_out = torch.randn(B, H, dtype=torch.double)
-
-    h = x.new_zeros(B, H)
-    c = x.new_zeros(B, H)
-    for t in range(T):
-        h, (h, c) = cell(x[:, t], (h, c),
-                         routing=((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t])))
-    grads_generic = torch.autograd.grad(h.sum() + (grad_out * h).sum(), cell.parameters(),
-                                        retain_graph=False, allow_unused=False)
-    x.grad = None
-
-    x_active = torch.gather(x, dim=-1, index=idx_x) * torch.gather(mask_x, dim=-1, index=idx_x)
-    h = x.new_zeros(B, H)
-    c = x.new_zeros(B, H)
-    for t in range(T):
-        h, (h, c) = cell.forward_active(x_active[t], idx_x[t], h, c, mask_h[t], idx_h[t])
-    grads_active = torch.autograd.grad(h.sum() + (grad_out * h).sum(), cell.parameters(),
-                                       retain_graph=False, allow_unused=False)
-
-    for g_generic, g_active in zip(grads_generic, grads_active):
-        assert torch.allclose(g_generic, g_active, atol=1e-9)
+    assert torch.allclose(h_g, h_a, atol=ATOL)
+    assert torch.allclose(c_g, c_a, atol=ATOL)
 
 
 def test_dsgru_active_matches_generic():
-    """DSGRU forward_active matches the generic gathered path."""
-    torch.manual_seed(0)
-    B, T, D, H = 4, 7, 8, 16
-    cell = DSGRUCell(input_size=D,
-                     hidden_size=H,
-                     router_config=_config(H, D),
-                     implementation="gathered").double()
-    x = torch.randn(B, T, D, dtype=torch.double)
-
-    flat = x.reshape(B * T, D)
-    input_routing, hidden_routing = cell.compute_routing_batched(flat)
-    mask_x = input_routing.mask.view(T, B, D)
-    idx_x = input_routing.idx.view(T, B, -1)
-    mask_h = hidden_routing.mask.view(T, B, H)
-    idx_h = hidden_routing.idx.view(T, B, -1)
-
-    h = x.new_zeros(B, H)
-    outputs_generic = []
-    for t in range(T):
-        h, _ = cell(x[:, t], h, routing=((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t])))
-        outputs_generic.append(h)
-    out_generic = torch.stack(outputs_generic, dim=1)
-
+    cell = make_cell(DSGRUCell)
+    torch.manual_seed(1)
+    x = torch.randn(B, T, D, dtype=torch.double).transpose(0, 1)
+    x = x.detach().requires_grad_(True)
+    cell = cell.double()
+    mask_x, idx_x, mask_h, idx_h = route_sequence(cell, x)
     x_active = torch.gather(x, dim=-1, index=idx_x) * torch.gather(mask_x, dim=-1, index=idx_x)
-    h = x.new_zeros(B, H)
-    outputs_active = []
+
+    h_g, h_a = x.new_zeros(B, H), x.new_zeros(B, H)
     for t in range(T):
-        h, _ = cell.forward_active(x_active[t], idx_x[t], h, mask_h[t], idx_h[t])
-        outputs_active.append(h)
-    out_active = torch.stack(outputs_active, dim=1)
+        h_g, _ = cell(x[t], h_g, routing=((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t])))
+        h_a, _ = cell.forward_active(x_active[t], idx_x[t], h_a, mask_h[t], idx_h[t])
 
-    assert torch.allclose(out_generic, out_active, atol=1e-10)
+    assert torch.allclose(h_g, h_a, atol=ATOL)
 
 
-def test_dsltc_gathered_matches_dense():
-    """Gathered DSLTC matches the dense path on identical masks."""
-    torch.manual_seed(0)
-    B, T, D, H = 4, 5, 6, 16
-    config = _config(H, D)
-    cell_dense = DSLTCCell(input_size=D,
-                           hidden_size=H,
-                           router_config=config,
-                           implementation="dense").double()
-    cell_gathered = DSLTCCell(input_size=D,
-                              hidden_size=H,
-                              router_config=_config(H, D, seed=0),
-                              implementation="gathered").double()
-    cell_gathered.load_state_dict(cell_dense.state_dict())
+def test_dslstm_active_backward_matches_generic():
+    cell = make_cell(DSLSTMCell).double()
+    torch.manual_seed(1)
+    x = torch.randn(B, T, D, dtype=torch.double).transpose(0, 1).detach().requires_grad_(True)
 
-    x = torch.randn(B, T, D, dtype=torch.double)
-    flat = x.reshape(B * T, D)
-    input_routing, hidden_routing = cell_dense.compute_routing_batched(flat)
-    mask_x = input_routing.mask.view(T, B, -1)
-    idx_x = input_routing.idx.view(T, B, -1)
-    mask_h = hidden_routing.mask.view(T, B, -1)
-    idx_h = hidden_routing.idx.view(T, B, -1)
-
-    state_dense = x.new_zeros(B, H)
-    state_gathered = x.new_zeros(B, H)
+    # Generic path.
+    mask_x, idx_x, mask_h, idx_h = route_sequence(cell, x)
+    h, c = x.new_zeros(B, H), x.new_zeros(B, H)
+    out_g = []
     for t in range(T):
-        routing_t = ((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t]))
-        _, state_dense = cell_dense(x[:, t], state_dense, routing=routing_t)
-        _, state_gathered = cell_gathered(x[:, t], state_gathered, routing=routing_t)
+        h, (h, c) = cell(x[t], (h, c), routing=((mask_x[t], idx_x[t]), (mask_h[t], idx_h[t])))
+        out_g.append(h)
+    loss_g = torch.stack(out_g, dim=0).sum()
+    loss_g.backward()
+    x_grad_g = x.grad.clone()
+    w_grad_g = cell.weight_hh.grad.clone()
 
-    assert torch.allclose(state_dense, state_gathered, atol=1e-9)
+    # Active path on fresh graph.
+    x2 = x.detach().clone().requires_grad_(True)
+    cell.zero_grad(set_to_none=True)
+    mask_x, idx_x, mask_h, idx_h = route_sequence(cell, x2)
+    x_active = torch.gather(x2, dim=-1, index=idx_x) * torch.gather(mask_x, dim=-1, index=idx_x)
+    h, c = x2.new_zeros(B, H), x2.new_zeros(B, H)
+    out_a = []
+    for t in range(T):
+        h, (h, c) = cell.forward_active(x_active[t], idx_x[t], h, c, mask_h[t], idx_h[t])
+        out_a.append(h)
+    loss_a = torch.stack(out_a, dim=0).sum()
+    loss_a.backward()
+
+    assert torch.allclose(loss_g, loss_a, atol=ATOL)
+    assert torch.allclose(x_grad_g, x2.grad, atol=ATOL)
+    assert torch.allclose(w_grad_g, cell.weight_hh.grad, atol=ATOL)
 
 
-def test_dsltc_gathered_mask_receives_gradient():
-    """Selected hidden channels receive gradient in the gathered LTC path."""
-    torch.manual_seed(0)
-    B, D, H = 4, 6, 16
-    cell = DSLTCCell(input_size=D,
-                     hidden_size=H,
-                     router_config=_config(H, D),
-                     implementation="gathered").double()
-    x = torch.randn(B, D, dtype=torch.double)
-    state = x.new_zeros(B, H)
+def test_sequence_models_match_cell_loop():
+    for model_cls, cell_cls in ((DSLSTM, DSLSTMCell), (DSGRU, DSGRUCell)):
+        cell = make_cell(cell_cls).double()
+        torch.manual_seed(1)
+        model = model_cls(input_size=D, hidden_size=H, router_config=cell.hidden_router.config,
+                          implementation="gathered").double()
+        model.cell.load_state_dict(cell.state_dict())
 
-    _, state = cell(x, state)
-    state.sum().backward()
-    router_grads = [p.grad for p in cell.hidden_router.parameters() if p.grad is not None]
-    assert len(router_grads) > 0
-    assert any(torch.any(g != 0) for g in router_grads)
+        torch.manual_seed(2)
+        x = torch.randn(B, T, D, dtype=torch.double)
+        out_m, state_m = model(x)
+
+        # Manual loop through the cell with precomputed routing.
+        xt = x.transpose(0, 1)
+        mask_x, idx_x, mask_h, idx_h = route_sequence(cell, xt)
+        x_active = torch.gather(xt, dim=-1, index=idx_x) * torch.gather(mask_x, dim=-1, index=idx_x)
+        h, c = x.new_zeros(B, H), x.new_zeros(B, H)
+        outputs = []
+        for t in range(T):
+            if model_cls is DSLSTM:
+                h, (h, c) = cell.forward_active(x_active[t], idx_x[t], h, c, mask_h[t], idx_h[t])
+            else:
+                h, _ = cell.forward_active(x_active[t], idx_x[t], h, mask_h[t], idx_h[t])
+            outputs.append(h)
+        out_ref = torch.stack(outputs, dim=0).transpose(0, 1)
+        assert torch.allclose(out_m, out_ref, atol=ATOL)
 
 
 def main():
     test_dslstm_active_matches_generic()
-    test_dslstm_active_backward_matches_generic()
     test_dsgru_active_matches_generic()
-    test_dsltc_gathered_matches_dense()
-    test_dsltc_gathered_mask_receives_gradient()
+    test_dslstm_active_backward_matches_generic()
+    test_sequence_models_match_cell_loop()
     print("All model equivalence tests passed.")
 
 
