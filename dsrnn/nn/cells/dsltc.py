@@ -19,6 +19,13 @@ class DSLTCCell(LTCCell):
     masks from two routers (input and hidden channels). The masks scale the
     per-connection activations inside the ODE solver: the hidden mask on the
     pre-synaptic channels, the input mask on the sensory channels.
+
+    With implementation="gathered", the recurrent per-connection activations
+    are computed only on the active pre-synaptic channels: the state and the
+    parameter rows are gathered at the selected indices, reducing the
+    ODE-unfold compute from O(B*H^2) to O(B*k*H). Gradient then reaches the
+    selected channels only (the "selected_only" backward rule); for "ste",
+    use the dense path, which passes gradient to all scores through topk_mask.
     """
 
     supports_precompute: bool = True
@@ -44,8 +51,8 @@ class DSLTCCell(LTCCell):
             router_config: Configuration for the hidden-channel router. The
                 input-channel router is derived from it by setting
                 num_channels=input_size.
-            implementation: Masked matmul implementation. Only "dense" is
-                currently supported.
+            implementation: Masked computation implementation, "gathered" or
+                "dense".
             share_context_projection: If True, the cell owns a single context
                 projection shared by both routers. Requires
                 router_config.context_dim.
@@ -59,16 +66,18 @@ class DSLTCCell(LTCCell):
             use_sensor_dynamic_mask: Whether to apply the input mask to the
                 sensory pathway.
         """
-        if implementation != "dense":
+        if implementation not in ("dense", "gathered"):
+            raise ValueError(f"Unknown implementation '{implementation}'.")
+        if implementation == "gathered" and router_config.backward == "ste":
             raise NotImplementedError(
-                f"DSLTCCell currently supports only the dense implementation, got '{implementation}'.")
+                "Gathered DSLTC does not support the 'ste' backward rule: gradients through the "
+                "gathered recurrent pathway only reach selected channels. Use implementation='dense' "
+                "for STE.")
 
         if isinstance(hidden_size, ncps.wirings.Wiring):
             wiring = hidden_size
-            units = wiring.units
         else:
-            units = hidden_size
-            wiring = ncps.wirings.FullyConnected(units)
+            wiring = ncps.wirings.FullyConnected(hidden_size)
 
         super().__init__(wiring=wiring,
                          in_features=input_size,
@@ -136,12 +145,54 @@ class DSLTCCell(LTCCell):
         hidden_routing = self.hidden_router(context)
         return input_routing, hidden_routing
 
+    def _gather_pre_params(self,
+                           idx_h: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor,
+                                                         torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Gather the pre-synaptic parameter rows at the active channels.
+
+        Args:
+            idx_h: Active channel indices of shape (B, k).
+
+        Returns:
+            The (w, mu, sigma, erev, static_mask) parameters gathered at idx_h,
+            each of shape (B, k, state_size).
+        """
+        batch_size, k = idx_h.shape
+        expand_idx = idx_h.unsqueeze(-1).expand(batch_size, k, self.state_size)
+
+        def gather_rows(param: torch.Tensor) -> torch.Tensor:
+            return (param.unsqueeze(0)
+                    .expand(batch_size, -1, -1)
+                    .gather(1, expand_idx))
+
+        w_g = gather_rows(self.make_positive_fn(self._params["w"]))
+        mu_g = gather_rows(self._params["mu"])
+        sigma_g = gather_rows(self._params["sigma"])
+        erev_g = gather_rows(self._params["erev"])
+        static_g = gather_rows(self._params["sparsity_mask"])
+        return w_g, mu_g, sigma_g, erev_g, static_g
+
     def _ode_solver(self,
                     inputs: torch.Tensor,
                     state: torch.Tensor,
                     elapsed_time: float,
                     mask_x: torch.Tensor,
-                    mask_h: torch.Tensor) -> torch.Tensor:
+                    mask_h: torch.Tensor,
+                    idx_h: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Run the unrolled ODE solver with the dynamic channel masks.
+
+        Args:
+            inputs: Mapped inputs of shape (B, sensory_size).
+            state: Current state of shape (B, state_size).
+            elapsed_time: Elapsed time since the last update.
+            mask_x: Input mask of shape (B, sensory_size).
+            mask_h: Hidden mask of shape (B, state_size).
+            idx_h: Active hidden-channel indices of shape (B, k). Required for
+                the gathered implementation.
+
+        Returns:
+            The next state of shape (B, state_size).
+        """
         sensory_w_activation = self.make_positive_fn(self._params["sensory_w"]) * self._sigmoid(
             inputs, self._params["sensory_mu"], self._params["sensory_sigma"])
         if self.use_sensor_dynamic_mask:
@@ -153,8 +204,32 @@ class DSLTCCell(LTCCell):
         w_denominator_sensory = torch.sum(sensory_w_activation, dim=1)
 
         cm_t = self.make_positive_fn(self._params["cm"]) / (elapsed_time / self._ode_unfolds)
-        w_param = self.make_positive_fn(self._params["w"])
+        gleak = self.make_positive_fn(self._params["gleak"])
         v_pre = state
+
+        if self.implementation == "gathered":
+            if idx_h is None:
+                raise ValueError("idx_h is required for the gathered implementation.")
+            # Gather the pre-synaptic parameters once per step; only the state
+            # changes across ODE unfolds.
+            w_g, mu_g, sigma_g, erev_g, static_g = self._gather_pre_params(idx_h)
+            mask_g = mask_h.gather(1, idx_h)  # (B, k)
+
+            for _ in range(self._ode_unfolds):
+                v_active = v_pre.gather(1, idx_h)  # (B, k)
+                sigma_act = torch.sigmoid((v_active.unsqueeze(-1) - mu_g) * sigma_g)  # (B, k, H)
+                w_activation = w_g * sigma_act * static_g * mask_g.unsqueeze(-1)
+                rev_activation = w_activation * erev_g
+
+                w_numerator = torch.sum(rev_activation, dim=1) + w_numerator_sensory
+                w_denominator = torch.sum(w_activation, dim=1) + w_denominator_sensory
+
+                numerator = cm_t * v_pre + gleak * self._params["vleak"] + w_numerator
+                denominator = cm_t + gleak + w_denominator
+                v_pre = numerator / (denominator + self._epsilon)
+            return v_pre
+
+        w_param = self.make_positive_fn(self._params["w"])
         for _ in range(self._ode_unfolds):
             w_activation = w_param * self._sigmoid(v_pre, self._params["mu"], self._params["sigma"])
             w_activation = w_activation * self._params["sparsity_mask"] * mask_h.unsqueeze(-1)
@@ -163,7 +238,6 @@ class DSLTCCell(LTCCell):
             w_numerator = torch.sum(rev_activation, dim=1) + w_numerator_sensory
             w_denominator = torch.sum(w_activation, dim=1) + w_denominator_sensory
 
-            gleak = self.make_positive_fn(self._params["gleak"])
             numerator = cm_t * v_pre + gleak * self._params["vleak"] + w_numerator
             denominator = cm_t + gleak + w_denominator
             v_pre = numerator / (denominator + self._epsilon)
@@ -181,8 +255,7 @@ class DSLTCCell(LTCCell):
             states: Current state of shape (B, state_size).
             elapsed_time: Elapsed time since the last update.
             routing: Optional precomputed ((mask_x, idx_x), (mask_h, idx_h)).
-                Only the masks are used (dense path). If None, routing is
-                computed from the mapped input.
+                If None, routing is computed from the mapped input.
 
         Returns:
             A (output, next_state) pair. output has shape (B, state_size) when
@@ -191,10 +264,11 @@ class DSLTCCell(LTCCell):
         mapped_inputs = self._map_inputs(inputs)
         if routing is None:
             input_routing, hidden_routing = self.compute_routing(mapped_inputs)
-            mask_x, mask_h = input_routing.mask, hidden_routing.mask
+            mask_x, idx_x = input_routing.mask, input_routing.idx
+            mask_h, idx_h = hidden_routing.mask, hidden_routing.idx
         else:
-            (mask_x, _), (mask_h, _) = routing
-        next_state = self._ode_solver(mapped_inputs, states, elapsed_time, mask_x, mask_h)
+            (mask_x, idx_x), (mask_h, idx_h) = routing
+        next_state = self._ode_solver(mapped_inputs, states, elapsed_time, mask_x, mask_h, idx_h)
         outputs = self._map_outputs(next_state)
         return outputs, next_state
 
