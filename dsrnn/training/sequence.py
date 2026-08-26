@@ -1,14 +1,11 @@
 """Sequence-level LightningModule for the classification/regression benchmarks.
 
-Port of the old ``SequenceForecastModule`` + ``PruningRNNLitModule`` pair,
-merged into a single module: the pruning/mask machinery (``masks``,
-``apply_masks``, the Lightning hooks) is always present and is a no-op until
-masks are attached, so RigL can run on the same class.
-
-Backbones are built headless; this module owns the final projection, so there
-is exactly one output path regardless of model type. Supported backbones:
-lstm, gru (dense torch), ltc (dense, via ncps), dslstm, dsgru, dsltc
-(dynamic-sparse).
+A single module wrapping a backbone RNN (dense or dynamic-sparse), an optional
+final projection, loss, metrics, optimizer/scheduler, and a test-time
+corruption harness. Pruning masks can be attached and are enforced every step
+(no-op when empty), so dynamic-sparse-training baselines (e.g. RigL) run on the
+same class. Supported backbones: lstm, gru (dense torch), ltc (dense, ncps),
+dslstm, dsgru, dsltc (dynamic-sparse).
 """
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -66,13 +63,12 @@ def build_backbone(model_type: str,
                    model_kwargs: Optional[Dict[str, Any]] = None) -> nn.Module:
     """Construct a headless backbone returning ``(outputs, state)``.
 
-    Supported: ``lstm``, ``gru`` (dense torch), ``ltc`` (dense, ncps),
-    ``dslstm``, ``dsgru``, ``dsltc`` (dynamic-sparse). For the DS models,
-    ``model_kwargs`` may contain a ``router_config`` entry (a RouterConfig or a
-    dict of its kwargs; ``num_channels``/``input_dim`` default to the hidden
-    and input sizes). For ``ltc``, extra ``model_kwargs`` go to ncps' LTC.
-    ``dsltc`` requires ``implementation="dense"`` when the router backward rule
-    is "ste" (the gathered DSLTC path only supports "selected_only").
+    For the DS models, ``model_kwargs`` may contain a ``router_config`` entry
+    (a RouterConfig or a dict of its kwargs; ``num_channels``/``input_dim``
+    default to the hidden and input sizes). For ``ltc``, extra ``model_kwargs``
+    go to ncps' LTC. ``dsltc`` requires ``implementation="dense"`` when the
+    router backward rule is "ste" (the gathered DSLTC path only supports
+    "selected_only").
     """
     model_type = model_type.lower()
     model_kwargs = dict(model_kwargs or {})
@@ -100,13 +96,7 @@ def build_backbone(model_type: str,
 
 
 class SequenceModule(lit.LightningModule):
-    """LightningModule for the sequence benchmarks (classification + regression).
-
-    Encapsulates a backbone RNN (dense or dynamic-sparse), an optional final
-    projection, loss, metrics, optimizer/scheduler, and the test-time
-    corruption harness. Pruning masks can be attached via ``self.masks`` and
-    are enforced every step (no-op when empty).
-    """
+    """LightningModule for the sequence benchmarks (classification + regression)."""
 
     def __init__(
         self,
@@ -145,7 +135,6 @@ class SequenceModule(lit.LightningModule):
         if use_final_proj:
             self.projection = nn.Linear(h_dim, output_size)
 
-        # Loss
         loss_kwargs = loss_kwargs or {}
         loss_type = loss_type.lower()
         if loss_type == "mse":
@@ -163,7 +152,6 @@ class SequenceModule(lit.LightningModule):
         else:
             raise ValueError(f"Unsupported loss type: {loss_type}")
 
-        # Test-time corruptions (robustness evaluation)
         self.test_corruptions: Dict[str, Callable] = {}
         if test_with_corruptions:
             for nl in [0.05, 0.1, 0.15, 0.2, 0.25, 0.3]:
@@ -189,7 +177,6 @@ class SequenceModule(lit.LightningModule):
             for m in metric_params
         }
 
-        # Pruning masks (attached externally for RigL; no-op when empty)
         self.masks: Dict[str, Optional[torch.Tensor]] = {}
 
     @property
@@ -282,8 +269,6 @@ class SequenceModule(lit.LightningModule):
                     },
                 }
         return {"optimizer": optimizer}
-
-    # -- pruning mask enforcement (no-op until masks are attached) --
 
     def apply_masks(self) -> None:
         if not self.masks:

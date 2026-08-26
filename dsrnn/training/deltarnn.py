@@ -1,8 +1,8 @@
 """DeltaRNN classifier LightningModule for the sparse-baseline experiments.
 
-Kept separate from ``dsrnn.training.sequence.SequenceModule`` because DeltaRNN
-has a different cell interface (returns an extra regularization term, logs
-temporal-sparsity statistics). Ported from the old ``train_deltarnn.py``.
+Separate from ``dsrnn.training.sequence.SequenceModule`` because DeltaRNN has
+a different cell interface (an extra regularization term and temporal-sparsity
+statistics).
 """
 
 import csv
@@ -68,7 +68,6 @@ class DeltaRNNClassifier(lit.LightningModule):
             self.test_mae = lambda preds, y: torch.mean(torch.abs(preds - y))
 
     def forward(self, x):
-        # x: [B, T, F] -> [T, B, F]
         x = x.transpose(0, 1)
         out, _, reg = self.rnn(x)  # [T, B, H]
 

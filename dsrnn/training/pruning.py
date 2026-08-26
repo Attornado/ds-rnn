@@ -1,10 +1,7 @@
-"""Pruning / dynamic sparse training primitives and Lightning callbacks.
+"""RigL dynamic sparse training primitives and Lightning callbacks.
 
-Faithful port of ``connectomencps.nn.pruning`` and
-``connectomencps.callbacks.pruning``, keeping only what the paper's
-baselines use: RigL dynamic sparse training (rewiring) plus the shared mask
-helpers. The IMP / lottery-ticket magnitude-pruning path is not part of the
-paper and was removed.
+Mask creation/enforcement helpers, the RigL rewiring step, and the Lightning
+callbacks that run it during training.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -19,10 +16,6 @@ from lightning.pytorch.callbacks import Callback
 
 _logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Primitives
-# ---------------------------------------------------------------------------
 
 def _params_to_prune(model: torch.nn.Module) -> List[Tuple[str, torch.Tensor]]:
     """Collect prunable parameters (excludes scalars and biases)."""
@@ -224,10 +217,6 @@ def sync_masks_across_ranks(masks: Dict[str, torch.Tensor]) -> Dict[str, torch.T
     return {name: synced[name].to(m.device) for name, m in masks.items()}
 
 
-# ---------------------------------------------------------------------------
-# Lightning callbacks
-# ---------------------------------------------------------------------------
-
 class MaskCallback(Callback):
     """Re-apply masks after each training batch (safety net for pruned weights)."""
 
@@ -260,7 +249,7 @@ class RigLCallback(Callback):
                  ignore_unselected_params: bool = False,
                  logger: Optional[logging.Logger] = None):
         super().__init__()
-        self.masks = masks  # shared mutable dict[name -> bool tensor]
+        self.masks = masks
         self.rewire_fraction = rewire_fraction
         self.update_frequency = update_frequency
         self.start_step = start_step
@@ -290,7 +279,7 @@ class RigLCallback(Callback):
 
         try:
             new_masks = sync_masks_across_ranks(new_masks)
-        except Exception as e:  # non-fatal
+        except Exception as e:
             self.logger.warning(f"mask sync failed: {e}")
 
         optimizers = trainer.optimizers if hasattr(trainer, "optimizers") else None
@@ -300,7 +289,6 @@ class RigLCallback(Callback):
                                     grow_init=self.grow_init, scale_init=self.scale_init,
                                     optimizer_list=optimizer_list)
 
-        # Update the shared mask dict in place (keep the same object reference)
         self.masks.clear()
         for k, v in new_masks.items():
             self.masks[k] = v
