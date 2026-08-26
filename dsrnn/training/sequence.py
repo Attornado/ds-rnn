@@ -7,7 +7,8 @@ masks are attached, so RigL can run on the same class.
 
 Backbones are built headless; this module owns the final projection, so there
 is exactly one output path regardless of model type. Supported backbones:
-lstm, gru (dense torch), ltc (dense, via ncps), dslstm, dsgru (dynamic-sparse).
+lstm, gru (dense torch), ltc (dense, via ncps), dslstm, dsgru, dsltc
+(dynamic-sparse).
 """
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -20,6 +21,7 @@ from torch import nn
 
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.models.dsgru_model import DSGRU
+from dsrnn.models.dsltc_model import DSLTC
 from dsrnn.models.ltc_model import LTC
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.optim import build_optimizer
@@ -65,10 +67,12 @@ def build_backbone(model_type: str,
     """Construct a headless backbone returning ``(outputs, state)``.
 
     Supported: ``lstm``, ``gru`` (dense torch), ``ltc`` (dense, ncps),
-    ``dslstm``, ``dsgru`` (dynamic-sparse). For the DS models, ``model_kwargs``
-    may contain a ``router_config`` entry (a RouterConfig or a dict of its
-    kwargs; ``num_channels``/``input_dim`` default to the hidden and input
-    sizes). For ``ltc``, extra ``model_kwargs`` are forwarded to ncps' LTC.
+    ``dslstm``, ``dsgru``, ``dsltc`` (dynamic-sparse). For the DS models,
+    ``model_kwargs`` may contain a ``router_config`` entry (a RouterConfig or a
+    dict of its kwargs; ``num_channels``/``input_dim`` default to the hidden
+    and input sizes). For ``ltc``, extra ``model_kwargs`` go to ncps' LTC.
+    ``dsltc`` requires ``implementation="dense"`` when the router backward rule
+    is "ste" (the gathered DSLTC path only supports "selected_only").
     """
     model_type = model_type.lower()
     model_kwargs = dict(model_kwargs or {})
@@ -82,12 +86,12 @@ def build_backbone(model_type: str,
         return LTC(input_size=input_size, hidden_size=hidden_size,
                    batch_first=batch_first, output_size=None, **model_kwargs)
 
-    if model_type in ("dslstm", "dsgru"):
+    if model_type in ("dslstm", "dsgru", "dsltc"):
         router = model_kwargs.pop("router_config", None)
         if router is None:
             raise ValueError(f"{model_type} requires a 'router_config' in model_kwargs.")
         router = _build_router_config(router, input_size, hidden_size)
-        cls = {"dslstm": DSLSTM, "dsgru": DSGRU}[model_type]
+        cls = {"dslstm": DSLSTM, "dsgru": DSGRU, "dsltc": DSLTC}[model_type]
         return cls(input_size=input_size, hidden_size=hidden_size,
                    router_config=router, implementation=implementation,
                    batch_first=batch_first, output_size=None, **model_kwargs)
