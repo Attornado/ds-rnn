@@ -1,79 +1,32 @@
-"""
-Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs a dense LSTM.
+"""Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs a dense LSTM.
+
+Reproduces the data behind the efficiency figure: FLOPs and runtime as a
+function of hidden size (fixed sequence length) and of sequence length (fixed
+hidden size), at fixed batch size, input size, and sparsity. Times the full
+forward pass (routing, top-k selection, and gathering included).
+
+The dense baseline is the repo's eager LSTM (``dsrnn.models.lstm_model.LSTM``):
+both it and ``DSLSTM(implementation="gathered")`` are per-timestep loops, so
+the gap isolates the routing + gathering overhead.
 
 Example (both sweeps, write CSV + figure):
 
-    python experiments/benchmark.py --sweep both --out _benchmarks/dslstm.csv --plot _benchmarks/dslstm.png
+    python experiments/benchmark.py --sweep both --out _benchmarks/dslstm.csv \\
+        --plot _benchmarks/dslstm.png
 """
+
 import argparse
 import csv
 import os
 import time
 from typing import Dict, List
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 from dsrnn.models.dslstm_model import DSLSTM
+from dsrnn.models.lstm_model import LSTM
 from dsrnn.nn.router import RouterConfig
-
-
-class NaiveLSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super().__init__()
-        self.input_size, self.hidden_size = input_size, hidden_size
-        self.weight_ih = nn.Parameter(torch.empty(4 * hidden_size, input_size))
-        self.weight_hh = nn.Parameter(torch.empty(4 * hidden_size, hidden_size))
-        self.bias_ih = nn.Parameter(torch.zeros(4 * hidden_size))
-        self.bias_hh = nn.Parameter(torch.zeros(4 * hidden_size))
-        nn.init.xavier_uniform_(self.weight_ih)
-        nn.init.orthogonal_(self.weight_hh)
-
-    def forward(self, x, hx=None):
-        batch_size = x.size(0)
-        if hx is None:
-            h = x.new_zeros(batch_size, self.hidden_size)
-            c = x.new_zeros(batch_size, self.hidden_size)
-        else:
-            h, c = hx
-        w_ih = self.weight_ih.view(4, self.hidden_size, self.input_size)
-        w_hh = self.weight_hh.view(4, self.hidden_size, self.hidden_size)
-        gates = []
-        for i in range(4):
-            i2h = F.linear(x, w_ih[i], self.bias_ih[i * self.hidden_size:(i + 1) * self.hidden_size])
-            h2h = F.linear(h, w_hh[i], self.bias_hh[i * self.hidden_size:(i + 1) * self.hidden_size])
-            gates.append(i2h + h2h)
-        i, f, g, o = torch.chunk(torch.stack(gates, dim=-1), 4, dim=-1)
-        i, f, g, o = i.squeeze(-1), f.squeeze(-1), g.squeeze(-1), o.squeeze(-1)
-        i, f, g, o = torch.sigmoid(i), torch.sigmoid(f), torch.tanh(g), torch.sigmoid(o)
-        c_new = f * c + i * g
-        h_new = o * torch.tanh(c_new)
-        return h_new, (h_new, c_new)
-
-
-class NaiveLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, batch_first=True):
-        super().__init__()
-        self.cell = NaiveLSTMCell(input_size, hidden_size)
-        self.batch_first = batch_first
-        self.hidden_size = hidden_size
-
-    def forward(self, x, hx=None):
-        if self.batch_first:
-            x = x.transpose(0, 1)
-        seq_len, batch, _ = x.shape
-        if hx is None:
-            h = x.new_zeros(batch, self.hidden_size)
-            c = x.new_zeros(batch, self.hidden_size)
-        else:
-            h, c = hx
-        outputs = []
-        for t in range(seq_len):
-            h, (h, c) = self.cell(x[t], (h, c))
-            outputs.append(h)
-        out = torch.stack(outputs, dim=0)
-        if self.batch_first:
-            out = out.transpose(0, 1)
-        return out, (h, c)
 
 
 def synchronize(device):
@@ -106,7 +59,7 @@ def flops(model, x):
 def build_models(D: int, H: int, sparsity: float, router_dim: int,
                  device: torch.device) -> Dict[str, nn.Module]:
     return {
-        "dense_lstm": NaiveLSTM(D, H).to(device).eval(),
+        "dense_lstm": LSTM(input_size=D, hidden_size=H).to(device).eval(),
         "ds_lstm": DSLSTM(
             input_size=D, hidden_size=H,
             router_config=RouterConfig(num_channels=H, input_dim=D,
@@ -169,7 +122,7 @@ def _plot(results: List[Dict], sweep: str, out_path: str) -> None:
     plt.close(fig)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sweep", type=str, default="both",
                         choices=["hidden", "seq", "both"],

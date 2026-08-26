@@ -1,5 +1,4 @@
-"""WeightWatcher analysis callback, adapted to the new model API.
-"""
+"""WeightWatcher analysis callback."""
 import os
 import lightning as lit
 import torch
@@ -7,12 +6,13 @@ from matplotlib import pyplot as plt
 from lightning.pytorch.loggers.wandb import WandbLogger
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.models.dsgru_model import DSGRU
+from dsrnn.models.gru_model import GRU
+from dsrnn.models.lstm_model import LSTM
 from dsrnn.models.ltc_model import LTC
-from dsrnn.training.sequence import _TorchRNNAdapter
 
 
 def _router_linears(router) -> torch.nn.ModuleList:
-    """Collect the torch.nn.Linear layers inside a (new, MLP) Router."""
+    """Collect the torch.nn.Linear layers inside a Router."""
     mods = torch.nn.ModuleList()
     for _, m in router.named_modules():
         if isinstance(m, torch.nn.Linear):
@@ -20,8 +20,8 @@ def _router_linears(router) -> torch.nn.ModuleList:
     return mods
 
 
-def _cell_weight_linears(cell, n_gates: int) -> torch.nn.ModuleDict:
-    """Split a DS cell's fused weight_ih/weight_hh into per-gate Linear modules."""
+def _cell_weight_linears(cell, n_gates: int, with_router: bool = True) -> torch.nn.ModuleDict:
+    """Split a cell's fused weight_ih/weight_hh into per-gate Linear modules."""
     modules = torch.nn.ModuleDict()
     H = cell.hidden_size
     wih_chunks = cell.weight_ih.split(H, dim=0)
@@ -46,60 +46,43 @@ def _cell_weight_linears(cell, n_gates: int) -> torch.nn.ModuleDict:
         lhh.append(lh)
     modules["ih"] = lih
     modules["hh"] = lhh
-    modules["router"] = _router_linears(cell.hidden_router)
-    modules["input_router"] = _router_linears(cell.input_router)
+    if with_router:
+        modules["router"] = _router_linears(cell.hidden_router)
+        modules["input_router"] = _router_linears(cell.input_router)
     return modules
 
 
 def extract_linear_modules(model: torch.nn.Module) -> torch.nn.ModuleDict:
     """Extract linear-equivalent modules from a backbone for WW analysis.
 
-    Accepts a SequenceModule backbone: DSLSTM/DSGRU (single ``.cell``), the
-    dense torch adapter (``.rnn`` = nn.LSTM/GRU), or the dense LTC (``.rnn``).
+    Accepts a SequenceModule backbone: DSLSTM/DSGRU (single ``.cell`` with a
+    router), dense LSTM/GRU (single ``.cell``, no router), or dense LTC.
     """
     modules = torch.nn.ModuleDict()
 
     if isinstance(model, (DSLSTM, DSGRU)):
         n_gates = 4 if isinstance(model, DSLSTM) else 3
-        modules["cell"] = _cell_weight_linears(model.cell, n_gates)
+        modules["cell"] = _cell_weight_linears(model.cell, n_gates, with_router=True)
         if isinstance(model.proj, torch.nn.Linear):
             modules["proj"] = model.proj
-    elif isinstance(model, _TorchRNNAdapter):
-        rnn = model.rnn  # torch.nn.LSTM/GRU
-        n_gates = 4 if isinstance(rnn, torch.nn.LSTM) else 3
-        H = rnn.hidden_size
-        for layer in range(rnn.num_layers):
-            wih = getattr(rnn, f"weight_ih_l{layer}")
-            whh = getattr(rnn, f"weight_hh_l{layer}")
-            bih = getattr(rnn, f"bias_ih_l{layer}")
-            bhh = getattr(rnn, f"bias_hh_l{layer}")
-            lih, lhh = torch.nn.ModuleList(), torch.nn.ModuleList()
-            for wih_c, whh_c, bih_c, bhh_c in zip(wih.split(H, 0), whh.split(H, 0),
-                                                  bih.split(H, 0), bhh.split(H, 0)):
-                li = torch.nn.Linear(wih_c.shape[1], H)
-                lh = torch.nn.Linear(H, H)
-                li.weight = torch.nn.Parameter(wih_c.clone())
-                lh.weight = torch.nn.Parameter(whh_c.clone())
-                li.bias = torch.nn.Parameter(bih_c.clone())
-                lh.bias = torch.nn.Parameter(bhh_c.clone())
-                lih.append(li)
-                lhh.append(lh)
-            modules[f"layer{layer}_ih"] = lih
-            modules[f"layer{layer}_hh"] = lhh
+    elif isinstance(model, (LSTM, GRU)):
+        n_gates = 4 if isinstance(model, LSTM) else 3
+        modules["cell"] = _cell_weight_linears(model.cell, n_gates, with_router=False)
+        if isinstance(model.proj, torch.nn.Linear):
+            modules["proj"] = model.proj
     elif isinstance(model, LTC):
         cell = model.rnn  # ncps LTC
         if isinstance(model.proj, torch.nn.Linear):
             modules["proj"] = model.proj
-        if hasattr(cell, "_cells") or hasattr(cell, "_params"):
-            params = getattr(cell, "_params", {})
-            if "w" in params:
-                lh = torch.nn.Linear(cell.state_size, cell.state_size, bias=False)
-                lh.weight = torch.nn.Parameter(params["w"].clone())
-                modules["hh"] = lh
-            if "sensory_w" in params:
-                li = torch.nn.Linear(model.input_size, cell.sensory_size, bias=False)
-                li.weight = torch.nn.Parameter(params["sensory_w"].clone())
-                modules["ih"] = li
+        params = getattr(cell, "_params", {})
+        if "w" in params:
+            lh = torch.nn.Linear(cell.state_size, cell.state_size, bias=False)
+            lh.weight = torch.nn.Parameter(params["w"].clone())
+            modules["hh"] = lh
+        if "sensory_w" in params:
+            li = torch.nn.Linear(model.input_size, cell.sensory_size, bias=False)
+            li.weight = torch.nn.Parameter(params["sensory_w"].clone())
+            modules["ih"] = li
     else:
         raise ValueError(f"Unsupported model class {type(model)} for WW analysis.")
 

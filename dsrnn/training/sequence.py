@@ -8,29 +8,13 @@ from torch import nn
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.models.dsgru_model import DSGRU
 from dsrnn.models.dsltc_model import DSLTC
+from dsrnn.models.gru_model import GRU
+from dsrnn.models.lstm_model import LSTM
 from dsrnn.models.ltc_model import LTC
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.optim import build_optimizer
 from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
 from dsrnn.training.metrics import resolve_metric
-
-
-class _TorchRNNAdapter(nn.Module):
-    """Thin adapter giving torch.nn.LSTM/GRU the ``(out, state)`` interface."""
-
-    def __init__(self, kind: str, input_size: int, hidden_size: int,
-                 num_layers: int = 1, dropout: float = 0.0,
-                 batch_first: bool = True):
-        super().__init__()
-        cls = {"lstm": nn.LSTM, "gru": nn.GRU}[kind]
-        self.rnn = cls(input_size=input_size, hidden_size=hidden_size,
-                       num_layers=num_layers, dropout=dropout,
-                       batch_first=batch_first)
-        self.hidden_size = hidden_size
-        self.input_size = input_size
-
-    def forward(self, x: torch.Tensor, hx=None):
-        return self.rnn(x, hx)
 
 
 def _build_router_config(router: Union[RouterConfig, Dict[str, Any]],
@@ -52,20 +36,25 @@ def build_backbone(model_type: str,
                    model_kwargs: Optional[Dict[str, Any]] = None) -> nn.Module:
     """Construct a headless backbone returning ``(outputs, state)``.
 
-    For the DS models, ``model_kwargs`` may contain a ``router_config`` entry
-    (a RouterConfig or a dict of its kwargs; ``num_channels``/``input_dim``
-    default to the hidden and input sizes). For ``ltc``, extra ``model_kwargs``
-    go to ncps' LTC. ``dsltc`` requires ``implementation="dense"`` when the
-    router backward rule is "ste" (the gathered DSLTC path only supports
-    "selected_only").
+    Supported: ``lstm``, ``gru``, ``ltc`` (dense), ``dslstm``, ``dsgru``,
+    ``dsltc`` (dynamic-sparse). For the DS models, ``model_kwargs`` may contain
+    a ``router_config`` entry (a RouterConfig or a dict of its kwargs;
+    ``num_channels``/``input_dim`` default to the hidden and input sizes). For
+    ``ltc``, extra ``model_kwargs`` go to ncps' LTC. ``dsltc`` requires
+    ``implementation="dense"`` when the router backward rule is "ste" (the
+    gathered DSLTC path only supports "selected_only").
     """
     model_type = model_type.lower()
     model_kwargs = dict(model_kwargs or {})
 
     if model_type in ("lstm", "gru"):
-        return _TorchRNNAdapter(model_type, input_size=input_size,
-                                hidden_size=hidden_size, batch_first=batch_first,
-                                **model_kwargs)
+        # The dense LSTM/GRU are single-layer specialized models; the generic
+        # DSRNN wrapper covers the multi-layer case.
+        model_kwargs.pop("num_layers", None)
+        model_kwargs.pop("dropout", None)
+        cls = {"lstm": LSTM, "gru": GRU}[model_type]
+        return cls(input_size=input_size, hidden_size=hidden_size,
+                   batch_first=batch_first, output_size=None, **model_kwargs)
 
     if model_type == "ltc":
         return LTC(input_size=input_size, hidden_size=hidden_size,
