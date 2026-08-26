@@ -12,6 +12,7 @@ Example (SplitMNIST, DS-LSTM, GEM):
 """
 
 import argparse
+import inspect
 import math
 import os
 
@@ -26,11 +27,44 @@ from torch.optim import SGD, AdamW
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.continual import build_cl_model
 
-# Old GNNRouterConfig field -> new RouterConfig field.
+# Old GNNRouterConfig field -> new RouterConfig field (rename only; fields that
+# no longer exist in the new config are dropped, see _router_kwargs_from_config).
 _ROUTER_KEY_MAP = {
     "sparsity_level": "sparsity",
     "in_channels": "context_dim",
 }
+
+
+def _router_kwargs_from_config(model_kwargs, hidden_size, input_size, args):
+    """Map the old gnn_router_cnf.init_args onto the new RouterConfig fields.
+
+    Renames the fields that changed, drops the ones that no longer exist, and
+    applies CLI overrides. Filtering is done against RouterConfig's actual
+    signature so this stays correct if the config grows new fields.
+    """
+    old_args = dict(
+        (model_kwargs.get("gnn_router_cnf", {}) or {}).get("init_args", {}) or {}
+    )
+    renamed = {_ROUTER_KEY_MAP.get(k, k): v for k, v in old_args.items()}
+
+    if args.sparsity is not None:
+        renamed["sparsity"] = args.sparsity
+    if args.context_dim is not None:
+        renamed["context_dim"] = args.context_dim
+    if args.router_backward is not None:
+        renamed["backward"] = args.router_backward
+    renamed.setdefault("num_channels", hidden_size)
+    renamed.setdefault("input_dim", input_size)
+
+    try:
+        accepted = set(inspect.signature(RouterConfig).parameters)
+    except (TypeError, ValueError):  # pragma: no cover
+        accepted = set(inspect.signature(RouterConfig.__init__).parameters)
+        accepted.discard("self")
+    dropped = sorted(set(renamed) - accepted)
+    if dropped:
+        print(f"[router-config] Dropping fields not in the new RouterConfig: {dropped}")
+    return {k: v for k, v in renamed.items() if k in accepted}
 
 
 def parse_args() -> argparse.Namespace:
@@ -181,21 +215,8 @@ def get_model_from_config(config, args, *, patch_and_project=False, project=Fals
 
     router_config = None
     if model_type in ("dslstm", "dsgru"):
-        old_router_args = dict(
-            (model_kwargs.get("gnn_router_cnf", {}) or {}).get("init_args", {}) or {}
-        )
-        router_kwargs = {}
-        for key, value in old_router_args.items():
-            router_kwargs[_ROUTER_KEY_MAP.get(key, key)] = value
-        # CLI overrides
-        if args.sparsity is not None:
-            router_kwargs["sparsity"] = args.sparsity
-        if args.context_dim is not None:
-            router_kwargs["context_dim"] = args.context_dim
-        if args.router_backward is not None:
-            router_kwargs["backward"] = args.router_backward
-        router_kwargs.setdefault("num_channels", model_cfg["hidden_size"])
-        router_kwargs.setdefault("input_dim", model_cfg["input_size"])
+        router_kwargs = _router_kwargs_from_config(
+            model_kwargs, model_cfg["hidden_size"], model_cfg["input_size"], args)
         router_config = RouterConfig(**router_kwargs)
 
     return build_cl_model(
