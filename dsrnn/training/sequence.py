@@ -92,9 +92,9 @@ class SequenceModule(lit.LightningModule):
     """LightningModule for the sequence benchmarks (classification + regression).
 
     Encapsulates a backbone RNN (dense or dynamic-sparse), an optional final
-    projection, loss, metrics, optimizer/scheduler, the DS entropy regularizer,
-    and the test-time corruption harness. Pruning masks can be attached via
-    ``self.masks`` and are enforced every step (no-op when empty).
+    projection, loss, metrics, optimizer/scheduler, and the test-time
+    corruption harness. Pruning masks can be attached via ``self.masks`` and
+    are enforced every step (no-op when empty).
     """
 
     def __init__(
@@ -108,7 +108,6 @@ class SequenceModule(lit.LightningModule):
         batch_first: bool = True,
         implementation: str = "gathered",
         model_kwargs: Optional[Dict[str, Any]] = None,
-        regularizer_ds: Optional[str] = None,
         test_transform: Optional[Callable] = None,
         loss_type: str = "ce",
         loss_kwargs: Optional[Dict[str, Any]] = None,
@@ -214,19 +213,7 @@ class SequenceModule(lit.LightningModule):
 
         loss = self.loss_fn(y_hat, y)
 
-        log_dict = {}
-        if self.hparams.regularizer_ds is not None and "ds" in self.hparams.model_type:
-            log_dict[f"{stage}/main_loss"] = loss.item()
-            if self.hparams.regularizer_ds == "entropy":
-                # NOTE: requires the router to expose `last_entropy_loss`.
-                regularizer_loss = self._ds_entropy_loss()
-                log_dict[f"{stage}/entropy_loss"] = regularizer_loss.item()
-            else:
-                raise NotImplementedError(
-                    f"Unsupported DS regularizer: {self.hparams.regularizer_ds}")
-            loss = loss + regularizer_loss
-
-        log_dict[f"{stage}/loss"] = loss.item()
+        log_dict = {f"{stage}/loss": loss.item()}
         for name, metric in self.metrics.items():
             log_dict[f"{stage}/{name}"] = metric(y_hat, y).item()
         on_step = stage == "train"
@@ -246,20 +233,6 @@ class SequenceModule(lit.LightningModule):
                 self.log_dict(dictionary=clog, on_step=on_step, sync_dist=True, prog_bar=True)
 
         return {"loss": loss}
-
-    def _ds_entropy_loss(self) -> torch.Tensor:
-        """Fetch the router entropy regularization term from the backbone."""
-        # The DS sequence models expose their cell as `.cell`; the entropy term
-        # lives on the router. This is defensive because the exact attribute
-        # path depends on the final router API.
-        cell = getattr(self.backbone, "cell", None)
-        router = getattr(cell, "router", None) if cell is not None else None
-        entropy = getattr(router, "last_entropy_loss", None) if router is not None else None
-        if entropy is None:
-            raise AttributeError(
-                "Could not find router.last_entropy_loss on the backbone; "
-                "the entropy regularizer needs the router to expose it.")
-        return entropy
 
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         return self._shared_step(batch, "train")

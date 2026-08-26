@@ -137,7 +137,6 @@ def main() -> None:
     parser.add_argument("--context_dim", type=int, default=4)
     parser.add_argument("--router_backward", type=str, default="selected_only",
                         choices=["selected_only", "ste"])
-    parser.add_argument("--regularizer_ds", type=str, default=None, choices=[None, "entropy"])
 
     # Optimization
     parser.add_argument("--lr", type=float, default=5e-3)
@@ -161,12 +160,8 @@ def main() -> None:
     if args.config is not None:
         with open(args.config) as f:
             file_cfg = yaml.safe_load(f) or {}
-        # Only apply YAML values for args the user did not explicitly pass.
         import sys
-        explicitly_set = set()
-        for i, token in enumerate(sys.argv[1:], start=1):
-            if token.startswith("--"):
-                explicitly_set.add(token[2:])
+        explicitly_set = {token[2:] for token in sys.argv[1:] if token.startswith("--")}
         for key, value in file_cfg.items():
             if hasattr(args, key) and key not in explicitly_set:
                 setattr(args, key, value)
@@ -196,7 +191,6 @@ def main() -> None:
         batch_first=True,
         implementation=args.implementation,
         model_kwargs=model_kwargs,
-        regularizer_ds=args.regularizer_ds,
         loss_type=task_cfg["loss_type"],
         optimizer_type=args.optimizer,
         optimizer_kwargs={"all": {"lr": args.lr, "weight_decay": args.weight_decay}},
