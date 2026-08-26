@@ -1,8 +1,10 @@
 """Pruning / dynamic sparse training primitives and Lightning callbacks.
 
 Faithful port of ``connectomencps.nn.pruning`` and
-``connectomencps.callbacks.pruning`` (IMP magnitude pruning + RigL rewiring),
-used by the sparse-baseline experiments.
+``connectomencps.callbacks.pruning``, keeping only what the paper's
+baselines use: RigL dynamic sparse training (rewiring) plus the shared mask
+helpers. The IMP / lottery-ticket magnitude-pruning path is not part of the
+paper and was removed.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -75,36 +77,6 @@ def count_nonzero_masks(masks: Dict[str, torch.Tensor]) -> Tuple[int, int]:
         total += m.numel()
         kept += int(m.sum().item())
     return kept, total
-
-
-def global_magnitude_prune(model: torch.nn.Module,
-                           current_masks: Dict[str, torch.Tensor],
-                           amount: float) -> Dict[str, torch.Tensor]:
-    """One IMP global-magnitude pruning step.
-
-    Prunes a fraction ``amount`` of the currently active weights (smallest
-    magnitude first, global threshold) and returns freshly-allocated masks.
-    """
-    vals = []
-    names_and_tensors = _params_to_prune(model)
-    for name, p in names_and_tensors:
-        mask = current_masks.get(name, torch.ones_like(p.data, dtype=torch.bool, device=p.device))
-        if mask.sum().item() == 0:
-            continue
-        vals.append(torch.abs(p.data[mask]).view(-1))
-    if len(vals) == 0:
-        return current_masks
-    allvals = torch.cat(vals)
-    k = int(np.floor(allvals.numel() * amount))
-    if k == 0:
-        return current_masks
-    thr, _ = torch.kthvalue(allvals, k)
-    new_masks = {}
-    for name, p in names_and_tensors:
-        cur_mask = current_masks.get(name, torch.ones_like(p.data, dtype=torch.bool, device=p.device))
-        keep_mask = torch.abs(p.data) > thr
-        new_masks[name] = cur_mask & keep_mask
-    return new_masks
 
 
 def rigl_step(model: torch.nn.Module,
