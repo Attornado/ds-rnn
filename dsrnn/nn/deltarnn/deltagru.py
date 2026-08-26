@@ -1,7 +1,12 @@
 """Delta-based GRU (DeltaGRU), Neil et al. 2017.
 
-Faithful port of ``connectomencps.nn.deltarnn.deltagru``; only the import
-paths changed (``dsrnn.nn.activations`` / ``dsrnn.nn.quantization``).
+Faithful port of ``connectomencps.nn.deltarnn.deltagru``; the import paths
+changed (``dsrnn.nn.activations`` / ``dsrnn.nn.quantization``), and the
+``@torch.jit.script`` decorators on the delta/gate helpers were removed —
+TorchScript scripting is incompatible with the ``inference_mode`` Lightning
+uses for evaluation (it raised "Inference tensors cannot be saved for
+backward" during ``trainer.test()``). The helpers are numerically identical as
+plain functions.
 """
 
 import numpy as np
@@ -154,7 +159,6 @@ class DeltaGRU(nn.GRU):
         return x, x_p_0, h_0, h_p_0, dm_ch_0, dm_0
 
     @staticmethod
-    @torch.jit.script
     def compute_deltas(x: Tensor, x_p: Tensor, h: Tensor, h_p: Tensor, th_x: Tensor, th_h: Tensor):
         delta_x = x - x_p
         delta_h = h - h_p
@@ -165,7 +169,6 @@ class DeltaGRU(nn.GRU):
         return delta_x, delta_h, delta_x_abs, delta_h_abs
 
     @staticmethod
-    @torch.jit.script
     def update_states(delta_x_abs, delta_h_abs, x, h, x_p, h_p, x_prev_out, th_x, th_h):
         x_p = torch.where(delta_x_abs >= th_x, x, x_p)
         x_prev_out[:, :x.size(-1)] = x_p
@@ -173,7 +176,6 @@ class DeltaGRU(nn.GRU):
         return x_p, h_p, x_prev_out
 
     @staticmethod
-    @torch.jit.script
     def compute_gates(delta_x: Tensor, delta_h: Tensor, dm: Tensor, dm_nh: Tensor,
                       weight_ih: Tensor, weight_hh: Tensor):
         mac_x = torch.mm(delta_x, weight_ih.t()) + dm

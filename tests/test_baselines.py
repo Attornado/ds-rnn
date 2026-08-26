@@ -24,10 +24,15 @@ def test_quantize_tensor():
     assert torch.equal(quantize_tensor(x, 8, 8, q_type=0), x)  # identity in training
     q = quantize_tensor(x, 2, 4, q_type=1)                     # round to 4 frac bits
     assert torch.allclose(q * 16, torch.round(q * 16), atol=1e-5)
-    # gradient flows (STE)
+    # STE gradient: 1 inside the representable range, 0 where the value
+    # saturates (the final clamp in quantize_tensor kills the gradient there).
     xg = x.clone().requires_grad_(True)
     quantize_tensor(xg, 2, 4, q_type=1).sum().backward()
-    assert xg.grad is not None and torch.allclose(xg.grad, torch.ones_like(xg))
+    power = 16.0                      # 2 ** qf
+    clip = float(2 ** (2 + 4 - 1))    # qi=2, qf=4 -> 32
+    inside = (xg.detach() * power >= -clip) & (xg.detach() * power <= clip - 1)
+    assert torch.allclose(xg.grad[inside], torch.ones_like(xg.grad[inside]))
+    assert torch.all(xg.grad[~inside] == 0)
 
 
 def test_deltagru_forward():
