@@ -1,4 +1,4 @@
-"""Smoke tests for the multitask module.
+"""Smoke tests for the multitask module and the mask-analysis callback.
 
 Constructs the dict-based multitask batch directly (no dataset download).
 Random tensors, CPU, fast_dev_run, no clutter.
@@ -77,11 +77,11 @@ def test_multitask_trainer_smoke_ds():
 
 
 def test_multitask_trainer_smoke_dsltc():
-    """dsltc through build_backbone (dense implementation)."""
+    """dsltc through build_backbone (selected_only uses the gathered path)."""
     import tempfile
     from lightning import Trainer
 
-    module = _module("dsltc", implementation="dense")
+    module = _module("dsltc")  # gathered + selected_only is supported
     loader = DataLoader([_batch()], batch_size=None, collate_fn=lambda b: b[0])
     with tempfile.TemporaryDirectory() as tmp:
         trainer = Trainer(fast_dev_run=True, logger=False, enable_checkpointing=False,
@@ -90,11 +90,35 @@ def test_multitask_trainer_smoke_dsltc():
         trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)
 
 
+def test_multitask_mask_analysis_callback():
+    """The cross-task mask-analysis callback runs on a DS multitask model."""
+    import tempfile
+    from lightning import Trainer
+    from dsrnn.training.sparsity import MultitaskMaskAnalysisCallback
+
+    module = _module("dslstm")
+    loader = DataLoader([_batch()], batch_size=None, collate_fn=lambda b: b[0])
+
+    class _DM:
+        def val_dataloader(self):
+            return loader
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cb = MultitaskMaskAnalysisCallback(datamodule=_DM(), every_n_epochs=1,
+                                           max_batches_per_task=1, log_validation=True)
+        trainer = Trainer(max_epochs=1, logger=False, enable_checkpointing=False,
+                          enable_progress_bar=False, enable_model_summary=False,
+                          default_root_dir=tmp, accelerator="cpu",
+                          callbacks=[cb], fast_dev_run=True)
+        trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)
+
+
 def main():
     test_multitask_forward_and_step()
     test_uncertainty_weighting()
     test_multitask_trainer_smoke_ds()
     test_multitask_trainer_smoke_dsltc()
+    test_multitask_mask_analysis_callback()
     print("All multitask tests passed.")
 
 

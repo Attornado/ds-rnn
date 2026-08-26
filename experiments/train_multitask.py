@@ -76,8 +76,9 @@ def build_model(tasks: List[str], model_type: str, hidden_size: int,
             num_channels=hidden_size, input_dim=hidden_size,
             context_dim=router_dim, n_layers=n_router_layers,
             sparsity=dynamic_sparsity, backward=router_backward)}
-        if model_type == "dsltc":
-            # DSLTCCell requires the dense path for the STE backward rule.
+        # DSLTCCell only forbids gathered+STE; gathered+selected_only is fine,
+        # dense is required only if the user explicitly selects ste.
+        if model_type == "dsltc" and router_backward == "ste":
             implementation = "dense"
     else:
         raise ValueError(f"Unsupported model_type: {model_type}")
@@ -144,6 +145,10 @@ def main() -> None:
     parser.add_argument("--devices", type=str, default="0")
     parser.add_argument("--num_workers", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+
+    # Analysis
+    parser.add_argument("--analyze_masks", action="store_true", default=False,
+                        help="Cross-task routing-overlap analysis (DS models).")
 
     # Logging
     parser.add_argument("--use_wandb", action="store_true")
@@ -216,6 +221,12 @@ def main() -> None:
         logger = CSVLogger(args.log_dir, name="rnn_multitask")
 
     callbacks = [EarlyStopping(monitor="val/loss", patience=25, mode="min", verbose=True)]
+    if args.analyze_masks:
+        from dsrnn.training.sparsity import MultitaskMaskAnalysisCallback
+        callbacks.append(MultitaskMaskAnalysisCallback(
+            datamodule=dm, every_n_epochs=1, max_batches_per_task=2,
+            log_validation=True))
+
     devices = [int(d) for d in args.devices.split(",")]
     trainer = Trainer(max_epochs=args.epochs, logger=logger, callbacks=callbacks,
                       accelerator="auto", devices=devices)
