@@ -213,11 +213,9 @@ class MultitaskMaskAnalysisCallback(lit.Callback):
     # -- mask collection --
 
     def _task_masks(self, pl_module) -> Dict[str, torch.Tensor]:
-        """Collect a per-task channel-mask centroid, shape (T, H) per task."""
+        """Collect per-task channel masks, shape (N, T, H) per task."""
         device = pl_module.device
         cell = pl_module.model.cell
-        task_masks: Dict[str, torch.Tensor] = {}
-
         task_xs: Dict[str, List[torch.Tensor]] = {t: [] for t in pl_module.tasks}
         counts = {t: 0 for t in pl_module.tasks}
         with torch.no_grad():
@@ -225,22 +223,18 @@ class MultitaskMaskAnalysisCallback(lit.Callback):
                 x = batch["x"].to(device)
                 task_ids = batch["task_id"].to(device)
                 x_lengths = batch["x_lengths"].to(device)
-                tasks = batch["task"]
                 for task in pl_module.tasks:
                     if counts[task] >= self.max_batches_per_task:
                         continue
-                    bmask = (task_ids == pl_module.task_to_id[task]).cpu()
+                    bmask = task_ids == pl_module.task_to_id[task]
                     if bmask.sum() == 0:
                         continue
-                    x_task = x[bmask.cpu()]
+                    x_task = x[bmask]
                     if not pl_module.hparams.shared_in_head:
                         Tx, Dx = x_lengths[bmask][0].tolist()
                         x_task = x_task[:, :Tx, :Dx]
-                    # condition on the task (project + task embedding)
-                    rnn_input = pl_module.get_rnn_input(
-                        x_task, pl_module.task_to_id[task] if not torch.is_tensor(pl_module.task_to_id[task]) else pl_module.task_to_id[task],
-                        task)
-                    task_id_tensor = torch.tensor(pl_module.task_to_id[task], device=device)
+                    task_id_tensor = torch.tensor(pl_module.task_to_id[task],
+                                                  device=device)
                     rnn_input = pl_module.get_rnn_input(x_task, task_id_tensor, task)
                     b, t, h = rnn_input.shape
                     flat = rnn_input.reshape(t * b, h)
@@ -250,11 +244,7 @@ class MultitaskMaskAnalysisCallback(lit.Callback):
                     counts[task] += 1
                 if all(c >= self.max_batches_per_task for c in counts.values()):
                     break
-        for task in pl_module.tasks:
-            if task_xs[task]:
-                m = torch.cat(task_xs[task], dim=0)  # (N, T, H)
-                task_masks[task] = m
-        return task_masks
+        return {t: torch.cat(v, dim=0) for t, v in task_xs.items() if v}
 
     def _shared(self, trainer, pl_module, stage):
         epoch = trainer.current_epoch
@@ -288,8 +278,7 @@ class MultitaskMaskAnalysisCallback(lit.Callback):
                 pad_t = max_t - c.shape[0]
                 c = torch.nn.functional.pad(c, (0, 0, 0, pad_t))
                 padded.append(c)
-            # (n_tasks, T, H) -> (1, 1, n_tasks, T, H)
-            stacked = torch.stack(padded, dim=0).unsqueeze(0).unsqueeze(0)
+            stacked = torch.stack(padded, dim=0).unsqueeze(0).unsqueeze(0)  # (1,1,n,T,H)
             pseudo_labels = torch.arange(n_tasks, device=pl_module.device)
             off_diag = ~np.eye(n_tasks, dtype=bool)
 
