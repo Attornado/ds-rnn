@@ -85,9 +85,10 @@ def build_optimizer(
     """Create an optimizer.
 
     Args:
-        named_parameters_or_params: either an iterable of ``(name, param)``
+        named_parameters_or_params: an iterable of ``(name, param)`` tuples
             (used with grouped ``optimizer_kwargs``) or a plain iterable of
-            parameters / pre-built group dicts.
+            parameters (used with flat ``optimizer_kwargs``). The flat path
+            also tolerates ``(name, param)`` tuples (they are unwrapped).
         optimizer_type: one of the keys in ``_OPTIMIZERS`` (case-insensitive).
         optimizer_kwargs: either flat kwargs (``{"lr": ...}``) applied to all
             parameters, or grouped kwargs (``{"all": {...}, "ssm": {...}}``)
@@ -102,10 +103,20 @@ def build_optimizer(
     cls = _OPTIMIZERS[optimizer_type]
     optimizer_kwargs = dict(optimizer_kwargs or {})
 
+    params = list(named_parameters_or_params)
+    named = bool(params) and all(
+        isinstance(p, tuple) and len(p) == 2 and isinstance(p[1], torch.Tensor)
+        for p in params
+    )
+
     is_grouped = bool(optimizer_kwargs) and all(
         isinstance(v, dict) for v in optimizer_kwargs.values()
     )
     if is_grouped:
-        groups = build_param_groups(named_parameters_or_params, optimizer_kwargs)
+        groups = build_param_groups(params, optimizer_kwargs)
         return cls(params=groups)
-    return cls(params=named_parameters_or_params, **optimizer_kwargs)
+
+    # Flat path: unwrap (name, param) tuples if given.
+    if named:
+        params = [p for _, p in params]
+    return cls(params=params, **optimizer_kwargs)
