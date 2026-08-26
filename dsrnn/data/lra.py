@@ -5,7 +5,6 @@ import urllib.request
 from functools import reduce
 from glob import glob
 from typing import Callable, List, Optional, Tuple
-
 import lightning as lit
 import numpy as np
 import pandas as pd

@@ -1,7 +1,5 @@
 """GRU cell."""
-
 from typing import Optional, Tuple
-
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -14,7 +12,8 @@ class GRUCell(nn.Module):
                  input_size: int,
                  hidden_size: int,
                  bias: bool = True):
-        """Initialize the cell.
+        """
+        Initialize the cell.
 
         Args:
             input_size: Number of input features.
@@ -45,7 +44,8 @@ class GRUCell(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 hx: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Run one cell step.
+        """
+        Run one cell step.
 
         Args:
             x: Current input of shape (B, input_size).

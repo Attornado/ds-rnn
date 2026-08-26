@@ -1,19 +1,16 @@
 from typing import Dict, List, Any, Optional, Tuple
-
 import lightning as lit
 import numpy as np
 import torch
 from torch.utils.data import Dataset, Sampler, DataLoader
-
-from dsrnn.data import (
-    SequentialMNISTDataModule, HARDataModule, HandGestureDataModule, OccupancyDataModule,
-    OzoneDataModule, TrafficDataModule, PowerConsumptionDataModule, CheetahDataModule,
-)
+from dsrnn.data import SequentialMNISTDataModule, HARDataModule, HandGestureDataModule, OccupancyDataModule, \
+    OzoneDataModule, TrafficDataModule, PowerConsumptionDataModule, CheetahDataModule
 from dsrnn.data.synthetic import CachedTemporalTaskDataModule, TemporalSyntheticDataset
 
 
 class MultiTaskDataset(Dataset):
-    """Dataset wrapper combining multiple task datasets while preserving task identity.
+    """
+    Dataset wrapper combining multiple task datasets while preserving task identity.
 
     Each sample is returned as a dict with keys 'x', 'y', 'task', 'task_id'.
     """
@@ -42,7 +39,8 @@ class MultiTaskDataset(Dataset):
 
 
 class BalancedBatchSampler(Sampler):
-    """Batch sampler that balances samples across multiple tasks.
+    """
+    Batch sampler that balances samples across multiple tasks.
 
     Each batch contains an equal number of samples from each task. If cycle is
     True, smaller datasets are cycled to match the largest one.

@@ -1,7 +1,5 @@
-"""Graph-theoretic metrics for sparsity-mask analysis."""
-
+"""Graph-theoretic metrics for sparsity-mask analys"""
 from typing import Dict
-
 import torch
 
 

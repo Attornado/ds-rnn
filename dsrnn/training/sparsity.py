@@ -1,25 +1,11 @@
-"""Sparsity-mask monitoring callbacks, adapted to the new channel router.
-
-Ported from ``connectomencps.callbacks.sparsity``. The old GNN router produced
-edge-level (N, N) adjacency masks; the new router produces channel masks
-(B, H), so the monitors visualize the channel mask over time (a channels x
-time heatmap), its evolution, and per-class averages. Graph metrics are
-computed on the mask-gated recurrent subnetwork (the cell's recurrent weight
-restricted to active channels) when ``with_graph_metrics`` is set.
-
-Also includes the multitask variant (``MultitaskMaskAnalysisCallback``) for
-cross-task routing-overlap analysis.
-"""
-
+"""Sparsity-mask monitoring callbacks, adapted to the new channel router."""
 import os
-from typing import Dict, List, Optional
-
+from typing import Dict, List
 import lightning as lit
 import numpy as np
 import torch
 from lightning.pytorch.loggers.wandb import WandbLogger
 from matplotlib import pyplot as plt
-
 from dsrnn.utils.sparsitymasks import (compute_inter_class_fuzzy_iou_similarity,
                                      compute_inter_class_jsd,
                                      compute_inter_class_similarity)

@@ -2,10 +2,8 @@
 
 from dataclasses import replace
 from typing import Dict, List, Optional, Tuple, Type
-
 import torch
 from torch import nn
-
 from dsrnn.nn.cells.dsgru import DSGRUCell
 from dsrnn.nn.cells.dslstm import DSLSTMCell
 from dsrnn.nn.cells.dsltc import DSLTCCell
@@ -13,6 +11,7 @@ from dsrnn.nn.cells.gru import GRUCell
 from dsrnn.nn.cells.lstm import LSTMCell
 from dsrnn.nn.functional import Implementation
 from dsrnn.nn.router import RouterConfig
+
 
 # name -> (cell class, whether the constructor takes a router_config)
 _CELL_TYPES: Dict[str, Tuple[Type[nn.Module], bool]] = {

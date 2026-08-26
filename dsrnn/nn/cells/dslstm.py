@@ -1,10 +1,7 @@
 """Dynamic-sparse LSTM cell."""
-
 from typing import Optional, Tuple
-
 import torch
 from torch import nn
-
 from dsrnn.nn.cells.base import DSRNNCell, RoutingOverride
 from dsrnn.nn.functional import Implementation, gathered_active_matmul
 from dsrnn.nn.router import RouterConfig

@@ -1,13 +1,11 @@
 """Input-dependent channel router."""
-
 import math
 from dataclasses import dataclass
 from typing import Optional
-
 import torch
 from torch import nn
-
 from dsrnn.nn.functional import BackwardRule, BudgetRounding, budget_from_sparsity, topk_mask
+
 
 _MLP_ACTIVATIONS = {
     "identity": nn.Identity,
@@ -23,7 +21,8 @@ _MLP_ACTIVATIONS = {
 
 
 def _activation(name: str) -> nn.Module:
-    """Resolve an activation name to a module.
+    """
+    Resolve an activation name to a module.
 
     Args:
         name: Activation name.
@@ -38,17 +37,17 @@ def _activation(name: str) -> nn.Module:
 
 
 class ScaledSigmoid(nn.Module):
-    """Scaled sigmoid with learnable sharpness and threshold.
-
-    Computes sigmoid(tau * (x - mu)). tau is stored in log-space to keep it
-    positive during optimization.
+    """
+    Scaled sigmoid with learnable sharpness and threshold. Computes sigmoid(tau * (x - mu)). tau is stored in log-space
+    to keep it positive during optimization.
     """
 
     def __init__(self,
                  tau_init: float = 1.0,
                  mu_init: float = 0.0,
                  learnable: bool = True):
-        """Initialize the scaled sigmoid.
+        """
+        Initialize the scaled sigmoid.
 
         Args:
             tau_init: Initial sharpness. Must be positive.
@@ -69,7 +68,8 @@ class ScaledSigmoid(nn.Module):
         return self.log_tau.exp()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply the scaled sigmoid.
+        """
+        Apply the scaled sigmoid.
 
         Args:
             x: Input tensor.
@@ -88,7 +88,8 @@ class ScaledSigmoid(nn.Module):
 
 @dataclass
 class RouterConfig:
-    """Configuration for Router.
+    """
+    Configuration for Router.
 
     Args:
         num_channels: Number of output channels to mask.
@@ -141,7 +142,8 @@ class RouterConfig:
 
 @dataclass
 class RouterOutput:
-    """Output of a Router forward pass.
+    """
+    Output of a Router forward pass.
 
     Args:
         mask: Channel mask of shape (B, N). Zero outside the top-k positions.
@@ -159,7 +161,8 @@ class Router(nn.Module):
     """Map a context vector to a sparse channel mask."""
 
     def __init__(self, config: RouterConfig):
-        """Initialize the router.
+        """
+        Initialize the router.
 
         Args:
             config: Router configuration.
@@ -211,7 +214,8 @@ class Router(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 backward: Optional[BackwardRule] = None) -> RouterOutput:
-        """Compute the channel mask for a batch of inputs.
+        """
+        Compute the channel mask for a batch of inputs.
 
         Args:
             x: Router input of shape (B, input_dim).

@@ -1,16 +1,15 @@
 import math
 from typing import Optional
-
 import torch
 from opt_einsum import contract
-
 from dsrnn.nn.activations import get_initializer, resolve_activation2
 
 
 def linear(x: torch.Tensor,
            weight: torch.Tensor,
            bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Compute x @ weight.T + bias.
+    """
+    Compute x @ weight.T + bias.
 
     Args:
         x: Input of shape (*, in_features).
@@ -29,7 +28,8 @@ def linear(x: torch.Tensor,
 def batched_linear(x: torch.Tensor,
                    weight: torch.Tensor,
                    bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Compute a linear map where each batch sample uses its own weight/bias.
+    """
+    Compute a linear map where each batch sample uses its own weight/bias.
 
     Args:
         x: Input of shape (B, *, in_features).

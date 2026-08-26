@@ -1,30 +1,20 @@
-"""RigL dynamic-sparse-training baseline.
-
-Argparse entry point; an optional YAML config pre-loads defaults and any
-explicitly-passed flag overrides it.
+"""
+RigL dynamic-sparse-training training script.
 
 Example (sequential MNIST, GRU, RigL at 90% sparsity):
 
     python experiments/train_pruning.py --task seqmnist --model_type gru \\
         --sparsity 0.9
 """
-
 import argparse
 import sys
 from typing import Dict, Tuple
-
 import torch
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
-
-from dsrnn.training.pruning import (
-    MaskCallback,
-    RigLCallback,
-    apply_masks_to_model,
-    count_nonzero_masks,
-    make_initial_masks,
-)
+from dsrnn.training.pruning import MaskCallback, RigLCallback, apply_masks_to_model, count_nonzero_masks, \
+    make_initial_masks
 from dsrnn.training.scheduler import LRSchedulerConfig
 from dsrnn.training.sequence import SequenceModule
 from dsrnn.training.tasks import TASKS, load_datamodule

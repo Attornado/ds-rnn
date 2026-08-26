@@ -20,12 +20,10 @@ contract = oe.contract
 
 
 class DSS4(nn.Module):
-    """S4 layer with input-dependent sparse gating over hidden channels.
-
-    A sequence-level router selects which hidden dimensions are active for each
-    input sequence; the mask is applied to the S4 convolution kernel (in the
-    frequency domain by default), or the active channels are gathered for a
-    reduced computation.
+    """
+    S4 layer with input-dependent sparse gating over hidden channels. A sequence-level router selects which hidden
+    dimensions are active for each input sequence; the mask is applied to the S4 convolution kernel (in the frequency
+    domain by default), or the active channels are gathered for a reduced computation.
     """
 
     def __init__(self,
@@ -57,7 +55,8 @@ class DSS4(nn.Module):
                  use_timewise_mask: bool = False,
                  use_sparse_implementation: bool = False,
                  **kernel_args):
-        """Initialize the layer.
+        """
+        Initialize the layer.
 
         Args:
             d_model: Model dimension H.

@@ -1,26 +1,18 @@
-"""Structured-sparsity ablation baselines (paper Sec. 4.2.3).
-
-Three masking strategies applied on top of a dense recurrent cell, used to
-isolate the contribution of (i) structured sparsity, (ii) input-dependent
-masking, and (iii) the learned routing mechanism:
-
-- ``StructuredSNIPMasker``: channel-level SNIP (van Amersfoort et al., 2020)
-  — a single gradient step on a real batch at init, mask frozen for the run.
-- ``LearnedGlobalMasker``: one input-independent structured mask learned
-  jointly with the weights (straight-through top-k).
-- ``RandomDynamicMasker``: random per-example top-k selection (learned router
-  replaced by chance).
-
-Ported from the old ``train_ablation_masking.py``. LSTM/GRU use the new repo's
-dense cells; LTC uses ncps' ``LTCCell`` with a fully-connected wiring.
 """
+Structured-sparsity ablation baselines (paper Sec. 4.2.3).
 
+Three masking strategies applied on top of a dense recurrent cell, used to isolate the contribution of (i) structured
+sparsity, (ii) input-dependent masking, and (iii) the learned routing mechanism:
+
+- ``StructuredSNIPMasker``: channel-level SNIP (van Amersfoort et al., 2020), a single gradient step on a real batch at
+    init, mask frozen for the run.
+- ``LearnedGlobalMasker``: one input-independent structured mask learned jointly with the weights (STE top-k).
+- ``RandomDynamicMasker``: random per-example top-k selection (learned router replaced by chance).
+"""
 from typing import Any, Dict, List, Optional, Tuple
-
 import lightning as lit
 import torch
 from torch import nn
-
 from dsrnn.nn.cells.gru import GRUCell
 from dsrnn.nn.cells.lstm import LSTMCell
 from dsrnn.training.metrics import resolve_metric

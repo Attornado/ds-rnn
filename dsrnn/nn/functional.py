@@ -2,8 +2,8 @@
 
 import math
 from typing import Literal, Optional, Tuple
-
 import torch
+
 
 BackwardRule = Literal["ste", "selected_only"]
 Implementation = Literal["gathered", "dense"]
@@ -13,7 +13,8 @@ BudgetRounding = Literal["floor", "ceil", "round"]
 def budget_from_sparsity(num_channels: int,
                          sparsity: float,
                          rounding: BudgetRounding = "floor") -> int:
-    """Compute the active-channel budget for a target sparsity.
+    """
+    Compute the active-channel budget for a target sparsity.
 
     Args:
         num_channels: Total number of channels.
@@ -44,7 +45,8 @@ def budget_from_sparsity(num_channels: int,
 def topk_mask(scores: torch.Tensor,
               k: int,
               backward: BackwardRule = "ste") -> Tuple[torch.Tensor, torch.Tensor]:
-    """Build a weighted top-k mask from continuous scores.
+    """
+    Build a weighted top-k mask from continuous scores.
 
     The mask is zero outside the top-k positions and holds the score values at
     the selected ones. With backward="ste", the Jacobian w.r.t. scores is the
@@ -79,10 +81,9 @@ def gathered_matmul(x: torch.Tensor,
                     weight: torch.Tensor,
                     idx: torch.Tensor,
                     bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Compute a gathered masked matmul with standard autograd.
-
-    Gradient reaches only the gathered (selected) channels. For the "ste"
-    backward rule, use gathered_recurrent_matmul instead.
+    """
+    Compute a gathered masked matmul with standard autograd. Gradient reaches only the gathered (selected) channels.
+    For the "ste" backward rule, use gathered_recurrent_matmul instead.
 
     Args:
         x: Input activations of shape (B, H).
@@ -106,7 +107,8 @@ def gathered_active_matmul(values: torch.Tensor,
                            idx: torch.Tensor,
                            weight: torch.Tensor,
                            bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Apply a gathered linear map to already-masked active values.
+    """
+    Apply a gathered linear map to already-masked active values.
 
     Args:
         values: Active inputs of shape (B, k).
@@ -127,11 +129,10 @@ def gathered_active_matmul(values: torch.Tensor,
 
 
 class GatheredRecurrentMatmul(torch.autograd.Function):
-    """Gathered column matmul with dense-equivalent mask gradients.
-
-    The backward pass contracts the upstream gradient with the full weight
-    matrix, so every mask entry receives gradient even though only the
-    selected columns were gathered. Required for the "ste" backward rule.
+    """
+    Gathered column matmul with dense-equivalent mask gradients. The backward pass contracts the upstream gradient with the full weight
+    matrix, so every mask entry receives gradient even though only the selected columns were gathered. Required for the
+    "ste" backward rule.
     """
 
     @staticmethod
@@ -159,7 +160,8 @@ class GatheredRecurrentMatmul(torch.autograd.Function):
     @staticmethod
     def backward(ctx,
                  grad_output: torch.Tensor):
-        """Return gradients for x, mask, and weight.
+        """
+        Return gradients for x, mask, and weight.
 
         Args:
             ctx: Autograd context with saved (x, mask, weight).
@@ -181,7 +183,8 @@ def gathered_recurrent_matmul(x: torch.Tensor,
                               weight: torch.Tensor,
                               idx: torch.Tensor,
                               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Compute a gathered masked matmul with dense-equivalent mask gradients.
+    """
+    Compute a gathered masked matmul with dense-equivalent mask gradients.
 
     Args:
         x: Input activations of shape (B, H).
@@ -201,7 +204,8 @@ def dense_masked_matmul(x: torch.Tensor,
                         mask: torch.Tensor,
                         weight: torch.Tensor,
                         bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Compute a masked matmul without gathering.
+    """
+    Compute a masked matmul without gathering.
 
     Args:
         x: Input activations of shape (B, H).
@@ -223,7 +227,8 @@ def masked_matmul(x: torch.Tensor,
                   bias: Optional[torch.Tensor] = None,
                   implementation: Implementation = "gathered",
                   backward: BackwardRule = "ste") -> torch.Tensor:
-    """Dispatch between gathered and dense masked matmul implementations.
+    """
+    Dispatch between gathered and dense masked matmul implementations.
 
     Args:
         x: Input activations of shape (B, H).

@@ -1,13 +1,5 @@
-"""Multi-task LightningModule: one shared backbone with per-task heads.
-
-A single recurrent backbone (dense or dynamic-sparse, via ``build_backbone``)
-is shared across tasks; each task gets its own input projection and output
-head, and a task embedding conditions the shared backbone. Per-task losses are
-combined through a task-weighting module (uncertainty / fixed / equal).
-"""
-
+"""Multi-task LightningModule: one shared backbone with per-task heads."""
 from typing import Any, Dict, List, Optional, Tuple
-
 import einops
 import lightning as lit
 import numpy as np
@@ -15,17 +7,16 @@ import torch
 import torchmetrics
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from torch import nn
-
 from dsrnn.training.optim import build_optimizer
 from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
 from dsrnn.training.sequence import build_backbone
 
 
 class UncertaintyTaskWeighting(nn.Module):
-    """Learnable homoscedastic uncertainty weighting (Kendall et al., 2018).
+    """
+    Learnable homoscedastic uncertainty weighting (Kendall et al., 2018).
 
-    Loss per task: (1 / 2σ_k²) * L_k + log σ_k, parametrized as
-    log_var_k = log(σ_k²) for numerical stability.
+    Loss per task: (1 / 2σ_k²) * L_k + log σ_k, parametrized as log_var_k = log(σ_k²) for numerical stability.
     """
 
     def __init__(self, task_names: List[str]):

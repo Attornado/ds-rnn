@@ -1,10 +1,4 @@
-"""Shared benchmark task registry for the classification/regression suites.
-
-Single source of truth used by both the classification and the pruning entry
-points. Datamodule classes are imported lazily inside ``load_datamodule`` so
-importing this module has no heavy side effects.
-"""
-
+"""Shared benchmark task registry for the classification/regression suites."""
 import importlib
 from typing import Any, Dict
 
@@ -63,7 +57,7 @@ TASKS: Dict[str, Dict[str, Any]] = {
         "metric_params": {"accuracy": {"task": "binary"}, "f1": {"task": "binary"}},
     },
     "traffic": {
-        "data": ("dsrnn.data.classification", "TrafficDataModule"),
+        "data": ("dsrnn.data.regression", "TrafficDataModule"),
         "data_kwargs": {"data_path": "_data/traffic", "val_split": 0.1,
                         "test_split": 0.15, "sequence_length": 32},
         "input_size": 7, "output_size": 1, "return_sequences": True,
@@ -71,7 +65,7 @@ TASKS: Dict[str, Dict[str, Any]] = {
         "metric_params": {"mse": {}, "mae": {}},
     },
     "power": {
-        "data": ("dsrnn.data.classification", "PowerConsumptionDataModule"),
+        "data": ("dsrnn.data.regression", "PowerConsumptionDataModule"),
         "data_kwargs": {"data_path": "_data/power", "val_split": 0.1,
                         "test_split": 0.15, "sequence_length": 32},
         "input_size": 6, "output_size": 1, "return_sequences": True,
@@ -79,7 +73,7 @@ TASKS: Dict[str, Dict[str, Any]] = {
         "metric_params": {"mse": {}, "mae": {}},
     },
     "cheetah": {
-        "data": ("dsrnn.data.cheetah", "CheetahDataModule"),
+        "data": ("dsrnn.data.regression", "CheetahDataModule"),
         "data_kwargs": {"data_path": "_data/cheetah", "sequence_length": 32},
         "input_size": 17, "output_size": 17, "return_sequences": True,
         "loss_type": "mse",

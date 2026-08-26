@@ -1,7 +1,5 @@
-"""Train a (DS-)RNN on a forecasting benchmark (pytorch_forecasting).
-
-Argparse entry point; an optional YAML config pre-loads defaults and any
-explicitly-passed flag overrides it.
+"""
+Train a (DS-)RNN on a forecasting benchmark (pytorch_forecasting).
 
 Example (ETTh1, DS-LSTM, encoder 168 / prediction 24):
 
@@ -12,19 +10,17 @@ Example (ETTh1, DS-LSTM, encoder 168 / prediction 24):
 import argparse
 import sys
 from typing import Any, Dict
-
 import lightning as lit
 import torch
 import yaml
 from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
-
 from dsrnn.data.forecasting import ForecastingDataModule
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.forecasting import ForecastModule
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; CLI flags override it.")
@@ -111,7 +107,7 @@ def main() -> None:
 
     import pytorch_forecasting as pf
     model = ForecastModule.from_dataset(
-        dm.trainds,
+        dataset=dm.train_ds,
         model_type=args.model_type,
         input_size=args.input_size,
         hidden_size=args.hidden_size,

@@ -5,10 +5,8 @@ optional dependency (install the ``data`` extra).
 """
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
 import torch
 from lightning import LightningModule
-
 from dsrnn.training.sequence import build_backbone
 
 try:

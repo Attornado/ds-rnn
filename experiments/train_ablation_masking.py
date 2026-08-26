@@ -1,26 +1,20 @@
-"""Structured-sparsity ablation baselines (SNIP / learned-global / random).
-
-Thin entry point over ``dsrnn.training.ablation``. An optional ``--config``
-YAML (flat key: value) pre-loads defaults and any explicitly-passed flag
-overrides it.
+"""
+Structured-sparsity ablation baselines (SNIP / learned-global / random).
 
 Example (sequential MNIST, LSTM, random dynamic routing at 90% sparsity):
 
     python experiments/train_ablation_masking.py --task seqmnist \\
         --model_type lstm --masker random --sparsity 0.9
 """
-
 import argparse
 import csv
 import os
 import sys
-
 import torch
 import yaml
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
-
 from dsrnn.training.ablation import AblationLitModule, StructuredSNIPMasker
 from dsrnn.training.tasks import TASKS, load_datamodule
 
@@ -40,7 +34,7 @@ class RunSummaryCSV(Callback):
             writer.writerow(list(metrics.values()))
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; CLI flags override it.")

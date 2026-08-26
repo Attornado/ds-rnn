@@ -1,31 +1,25 @@
 """Dynamic-sparse LTC cell."""
-
 from dataclasses import replace
 from typing import Optional, Tuple, Union
-
 import ncps
 import torch
 from ncps.torch import LTCCell
-
 from dsrnn.nn.cells.base import RoutingOverride
 from dsrnn.nn.functional import Implementation
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
 
 
 class DSLTCCell(LTCCell):
-    """LTC cell with input-dependent sparse gating.
+    """
+    LTC cell with input-dependent sparse gating.
 
-    Inherits the ODE-solver machinery from ncps.torch.LTCCell and adds channel
-    masks from two routers (input and hidden channels). The masks scale the
-    per-connection activations inside the ODE solver: the hidden mask on the
-    pre-synaptic channels, the input mask on the sensory channels.
-
-    With implementation="gathered", the recurrent per-connection activations
-    are computed only on the active pre-synaptic channels: the state and the
-    parameter rows are gathered at the selected indices, reducing the
-    ODE-unfold compute from O(B*H^2) to O(B*k*H). Gradient then reaches the
-    selected channels only (the "selected_only" backward rule); for "ste",
-    use the dense path, which passes gradient to all scores through topk_mask.
+    Inherits the ODE-solver machinery from ncps.torch.LTCCell and adds channel masks from two routers (input and hidden
+    channels). The masks scale the per-connection activations inside the ODE solver: the hidden mask on the
+    pre-synaptic channels, the input mask on the sensory channels. With implementation="gathered", the recurrent
+    per-connection activations are computed only on the active pre-synaptic channels: the state and the
+    parameter rows are gathered at the selected indices, reducing the ODE-unfold compute from O(B*H^2) to O(B*k*H).
+    Gradient then reaches the selected channels only (the "selected_only" backward rule); for "ste", use the dense path,
+    which passes gradient to all scores through topk_mask.
     """
 
     supports_precompute: bool = True
@@ -248,7 +242,8 @@ class DSLTCCell(LTCCell):
                 states: torch.Tensor,
                 elapsed_time: float = 1.0,
                 routing: Optional[RoutingOverride] = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Run one cell step.
+        """
+        Run one cell step.
 
         Args:
             inputs: Current input of shape (B, input_size).

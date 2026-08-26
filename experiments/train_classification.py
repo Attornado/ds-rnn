@@ -1,7 +1,5 @@
-"""Train a sequence model on the classification/regression benchmarks.
-
-Argparse entry point; an optional YAML config pre-loads defaults and any
-explicitly-passed flag overrides it.
+"""
+Train a sequence model on the classification/regression benchmarks.
 
 Example (sequential MNIST, DS-LSTM):
 
@@ -9,23 +7,20 @@ Example (sequential MNIST, DS-LSTM):
         --task seqmnist --model_type dslstm --hidden_size 128 \\
         --sparsity 0.9 --lr 1e-2 --epochs 500
 """
-
 import argparse
 import sys
 from typing import Any, Dict
-
 import torch
 import yaml
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
-
 from dsrnn.training.scheduler import LRSchedulerConfig
 from dsrnn.training.sequence import SequenceModule
 from dsrnn.training.tasks import TASKS, load_datamodule
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; CLI flags override it.")

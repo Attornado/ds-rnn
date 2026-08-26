@@ -1,7 +1,5 @@
-"""Train a shared (DS-)RNN jointly on multiple tasks.
-
-Argparse entry point; an optional ``--config`` YAML (flat key: value)
-pre-loads defaults and any explicitly-passed flag overrides it.
+"""
+Train a shared (DS-)RNN jointly on multiple tasks.
 
 Example (natural multi-task set, DS-LSTM, uncertainty weighting):
 
@@ -18,17 +16,14 @@ Example (synthetic teacher-student tasks):
 import argparse
 import sys
 from typing import Any, Dict, List, Optional
-
 import torch
 import yaml
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
-
 from dsrnn.data.multitask import MultiTaskDataModule
 from dsrnn.nn.router import RouterConfig
-from dsrnn.training.multitask import (FixedTaskWeighting, MultitaskModule,
-                                      UncertaintyTaskWeighting)
+from dsrnn.training.multitask import FixedTaskWeighting, MultitaskModule, UncertaintyTaskWeighting
 from dsrnn.training.scheduler import LRSchedulerConfig
 
 

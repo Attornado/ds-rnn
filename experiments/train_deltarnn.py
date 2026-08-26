@@ -1,7 +1,5 @@
-"""Train a DeltaRNN (DeltaGRU / DeltaLSTM) baseline.
-
-Ported from the old ``train_deltarnn.py``. Argparse-first; optional ``--config``
-YAML (flat key: value) overridden by any flag. Uses the shared task registry.
+"""
+Train a DeltaRNN (DeltaGRU / DeltaLSTM) baseline.
 
 Example (SeqMNIST, DeltaGRU):
 

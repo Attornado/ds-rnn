@@ -1,7 +1,5 @@
 """Dense LTC sequence model wrapping ncps.torch.LTC."""
-
 from typing import Optional, Tuple
-
 import torch
 from ncps.torch import LTC as _NcpsLTC
 from ncps.wirings import FullyConnected
@@ -27,8 +25,7 @@ class LTC(nn.Module):
                             **ltc_kwargs)
         self.proj = nn.Identity() if output_size is None else nn.Linear(hidden_size, output_size)
 
-    def forward(self, x: torch.Tensor, hx: Optional[torch.Tensor] = None
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, hx: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """Run the LTC over a sequence. Returns (outputs, final_state)."""
         outputs, state = self.rnn(x, hx)
         return self.proj(outputs), state

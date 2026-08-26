@@ -1,12 +1,6 @@
-"""Learning-rate scheduler construction.
-
-String-dispatched scheduler builders with per-type defaults, plus the
-Lightning scheduler config container.
-"""
-
+"""Learning-rate scheduler construction."""
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
-
 import torch
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,

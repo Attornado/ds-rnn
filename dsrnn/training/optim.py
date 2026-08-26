@@ -1,12 +1,5 @@
-"""Optimizers with parameter-group support.
-
-Lowercase-string optimizer dispatch plus a helper to split model parameters
-into groups by name pattern (e.g. to give SSM kernel parameters a lower
-learning rate and zero weight decay).
-"""
-
+"""Optimizers with parameter-group support."""
 from typing import Any, Dict, Iterable, List, Tuple
-
 import re
 import torch
 

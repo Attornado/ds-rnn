@@ -1,5 +1,4 @@
 """Plotting utilities for sparsity-mask analysis."""
-
 import numpy as np
 import torch
 from matplotlib import pyplot as plt

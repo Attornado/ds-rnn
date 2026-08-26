@@ -1,14 +1,5 @@
 """Delta-based GRU (DeltaGRU), Neil et al. 2017.
-
-Faithful port of ``connectomencps.nn.deltarnn.deltagru``; the import paths
-changed (``dsrnn.nn.activations`` / ``dsrnn.nn.quantization``), and the
-``@torch.jit.script`` decorators on the delta/gate helpers were removed —
-TorchScript scripting is incompatible with the ``inference_mode`` Lightning
-uses for evaluation (it raised "Inference tensors cannot be saved for
-backward" during ``trainer.test()``). The helpers are numerically identical as
-plain functions.
 """
-
 import numpy as np
 import torch
 import torch.nn as nn

@@ -1,18 +1,12 @@
-"""DeltaRNN classifier LightningModule for the sparse-baseline experiments.
-
-Separate from ``dsrnn.training.sequence.SequenceModule`` because DeltaRNN has
-a different cell interface (an extra regularization term and temporal-sparsity
-statistics).
 """
-
+DeltaRNN classifier LightningModule for the sparse-baseline experiments.
+"""
 import csv
 import os
-
 import lightning as lit
 import torch
 import torchmetrics
 from torch import nn
-
 from dsrnn.nn.deltarnn import DeltaGRU, DeltaLSTM
 
 

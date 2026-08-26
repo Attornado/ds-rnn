@@ -28,7 +28,8 @@ class GradPreserveRound(torch.autograd.Function):
 
 
 def quantize_tensor(x: torch.Tensor, qi: int, qf: int, q_type: int = 0) -> torch.Tensor:
-    """Quantize a tensor to fixed-point precision.
+    """
+    Quantize a tensor to fixed-point precision.
 
     Args:
         x: Input tensor.

@@ -1,24 +1,14 @@
 """WeightWatcher analysis callback, adapted to the new model API.
-
-Ported from ``connectomencps.callbacks.ww`` + ``connectomencps.nn.ww``. The old
-extractors read GNN-router / multi-layer attributes; the new models expose a
-single ``.cell`` with MLP routers, so the extractors are rewritten accordingly
-(and no longer need torch_geometric). Requires the ``weightwatcher`` package
-(the ``ww`` extra).
 """
-
 import os
-from typing import Dict, Optional, Tuple
-
 import lightning as lit
 import torch
 from matplotlib import pyplot as plt
 from lightning.pytorch.loggers.wandb import WandbLogger
-
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.models.dsgru_model import DSGRU
 from dsrnn.models.ltc_model import LTC
-from dsrnn.training.sequence import SequenceModule, _TorchRNNAdapter
+from dsrnn.training.sequence import _TorchRNNAdapter
 
 
 def _router_linears(router) -> torch.nn.ModuleList:

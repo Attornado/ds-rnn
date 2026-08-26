@@ -1,12 +1,6 @@
-"""Metric registry.
-
-Torchmetrics functionals plus custom dice / Brier / adaptive-ECE metrics,
-resolved by name.
-"""
-
+"""Metric registry. Torchmetrics functionals plus custom dice / Brier / adaptive-ECE metrics, resolved by name."""
 import functools
 from typing import Any, Callable, Dict, Optional
-
 import torch
 import torchmetrics
 

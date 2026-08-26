@@ -14,7 +14,8 @@ class LSTMCell(nn.Module):
                  input_size: int,
                  hidden_size: int,
                  bias: bool = True):
-        """Initialize the cell.
+        """
+        Initialize the cell.
 
         Args:
             input_size: Number of input features.
@@ -46,7 +47,8 @@ class LSTMCell(nn.Module):
                 x: torch.Tensor,
                 hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
                 ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """Run one cell step.
+        """
+        Run one cell step.
 
         Args:
             x: Current input of shape (B, input_size).

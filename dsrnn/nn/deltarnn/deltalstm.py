@@ -1,7 +1,4 @@
 """Delta-based LSTM (DeltaLSTM), Neil et al. 2017.
-
-Faithful port of ``connectomencps.nn.deltarnn.deltalstm``; only the import
-paths changed (``dsrnn.nn.activations`` / ``dsrnn.nn.quantization``).
 """
 
 import numpy as np

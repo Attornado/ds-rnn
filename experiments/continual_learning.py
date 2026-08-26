@@ -1,21 +1,15 @@
-"""Continual learning experiments (Avalanche-managed training loops).
-
-Argparse entry point: every setting is a CLI flag. An optional ``--config``
-YAML (flat ``key: value`` pairs matching the flag names) pre-loads defaults and
-any explicitly-passed CLI flag overrides it.
+"""
+Continual learning experiments (Avalanche-managed training loops).
 
 Example (SplitMNIST, DS-LSTM, GEM):
 
-    python experiments/continual_learning.py \\
-        --benchmark splitmnist --model_type dslstm --hidden_size 128 \\
+    python experiments/continual_learning.py --benchmark splitmnist --model_type dslstm --hidden_size 128 \
         --sparsity 0.9 --strategy gem --epochs 2
 """
-
 import argparse
 import math
 import os
 import sys
-
 import lightning as lit
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,7 +17,6 @@ import torch
 import yaml
 from torch import nn
 from torch.optim import SGD, AdamW
-
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.continual import build_cl_model
 
@@ -31,7 +24,7 @@ from dsrnn.training.continual import build_cl_model
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
-    # Config file (optional; CLI flags override it)
+    # Config file (CLI flags override it)
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML with flat key: value defaults.")
 
@@ -440,7 +433,7 @@ def plot_results(results_list, args, save_folder="_plots/cl_plots"):
                       model_type, strategy_label, save_folder)
 
 
-def main() -> None:
+def main():
     args = parse_args()
 
     lit.seed_everything(seed=args.seed)
@@ -531,8 +524,7 @@ def main() -> None:
             save_checkpoint(strategy=cl_strategy, fname=args.ckpt_path + ".avalanche.ckpt")
             torch.save(
                 model.state_dict(),
-                os.path.join(os.path.dirname(args.ckpt_path),
-                             os.path.basename(args.ckpt_path) + "_model.ckpt"),
+                os.path.join(os.path.dirname(args.ckpt_path), os.path.basename(args.ckpt_path) + "_model.ckpt"),
             )
 
     if len(results) > 0:

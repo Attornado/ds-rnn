@@ -1,18 +1,12 @@
-"""RigL dynamic sparse training primitives and Lightning callbacks.
-
-Mask creation/enforcement helpers, the RigL rewiring step, and the Lightning
-callbacks that run it during training.
-"""
-
+"""RigL dynamic sparse training primitives and Lightning callbacks."""
 from typing import Dict, List, Optional, Tuple
-
 import logging
-
 import lightning as lit
 import numpy as np
 import torch
 import torch.distributed as dist
 from lightning.pytorch.callbacks import Callback
+
 
 _logger = logging.getLogger(__name__)
 

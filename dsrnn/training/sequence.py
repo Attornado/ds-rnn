@@ -1,21 +1,10 @@
-"""Sequence-level LightningModule for the classification/regression benchmarks.
-
-A single module wrapping a backbone RNN (dense or dynamic-sparse), an optional
-final projection, loss, metrics, optimizer/scheduler, and a test-time
-corruption harness. Pruning masks can be attached and are enforced every step
-(no-op when empty), so dynamic-sparse-training baselines (e.g. RigL) run on the
-same class. Supported backbones: lstm, gru (dense torch), ltc (dense, ncps),
-dslstm, dsgru, dsltc (dynamic-sparse).
-"""
-
+"""Sequence-level LightningModule for the classification/regression benchmarks."""
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-
 import einops
 import lightning as lit
 import torch
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from torch import nn
-
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.models.dsgru_model import DSGRU
 from dsrnn.models.dsltc_model import DSLTC

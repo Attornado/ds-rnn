@@ -1,23 +1,13 @@
-"""LRA LightningModule for the S4 model family (S4 / DS-S4 / Liquid variants).
-
-A single ``LRAModule`` unifies S4-based classification: an input embedding or
-projection feeds a stack of S4 residual blocks (norm -> S4 -> dropout -> GELU
--> linear -> residual), followed by pooling and a linear head. Dense S4 is
-``DSS4(router_config=None)`` (no router, no mask); "dss4" adds dynamic-sparse
-routing, and "liqs4"/"dsliqs4" add the liquid kernel. ``norm_type`` selects
-batch or layer normalization.
-"""
-
+"""LRA LightningModule for the S4 model family (S4 / DS-S4 / Liquid variants)"""
 from typing import Any, Callable, Dict, Optional
-
 import lightning as lit
 import torch
 from torch import nn
-
 from dsrnn.nn.dss4 import DSS4
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.optim import build_optimizer
 from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
+
 
 # SSM kernel parameters get their own group: lower LR, zero weight decay.
 SSM_PARAM_PATTERN = r"kernel.*(?:log_dt|[BCP])"

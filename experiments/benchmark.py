@@ -1,30 +1,18 @@
-"""Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs a dense LSTM.
-
-Reproduces the data behind the efficiency figure: FLOPs and runtime as a
-function of hidden size (fixed sequence length) and of sequence length (fixed
-hidden size), at fixed batch size, input size, and sparsity. Times the full
-forward pass (routing, top-k selection, and gathering included).
-
-The dense baseline is an eager LSTM loop (``NaiveLSTM``): both it and
-``DSLSTM(implementation="gathered")`` are per-timestep loops, so the gap
-isolates the routing + gathering overhead.
+"""
+Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs a dense LSTM.
 
 Example (both sweeps, write CSV + figure):
 
-    python experiments/benchmark.py --sweep both --out _benchmarks/dslstm.csv \\
-        --plot _benchmarks/dslstm.png
+    python experiments/benchmark.py --sweep both --out _benchmarks/dslstm.csv --plot _benchmarks/dslstm.png
 """
-
 import argparse
 import csv
 import os
 import time
 from typing import Dict, List
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.nn.router import RouterConfig
 
@@ -181,7 +169,7 @@ def _plot(results: List[Dict], sweep: str, out_path: str) -> None:
     plt.close(fig)
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sweep", type=str, default="both",
                         choices=["hidden", "seq", "both"],

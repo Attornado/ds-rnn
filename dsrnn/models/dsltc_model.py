@@ -1,20 +1,16 @@
 """Specialized sequence-level dynamic-sparse LTC."""
-
 from typing import Optional, Tuple
-
 import torch
 from torch import nn
-
 from dsrnn.nn.cells.dsltc import DSLTCCell
 from dsrnn.nn.functional import Implementation
 from dsrnn.nn.router import RouterConfig
 
 
 class DSLTC(nn.Module):
-    """Single-layer DS-LTC optimized for sequence-level routing.
-
-    Routing is computed over the full sequence with one batched call; the
-    recurrent loop applies the precomputed masks per timestep.
+    """
+    Single-layer DS-LTC optimized for sequence-level routing. Routing is computed over the full sequence with one
+    batched call; the recurrent loop applies the precomputed masks per timestep.
     """
 
     def __init__(self,

@@ -1,21 +1,17 @@
 """Specialized sequence-level dynamic-sparse GRU."""
 
 from typing import Optional, Tuple
-
 import torch
 from torch import nn
-
 from dsrnn.nn.cells.dsgru import DSGRUCell
 from dsrnn.nn.functional import Implementation
 from dsrnn.nn.router import RouterConfig
 
 
 class DSGRU(nn.Module):
-    """Single-layer DS-GRU optimized for sequence-level routing.
-
-    Routing and input-channel gathering are computed over the full sequence
-    before entering the recurrent loop. The loop delegates the cell update to
-    DSGRUCell.forward_active.
+    """
+    Single-layer DS-GRU optimized for sequence-level routing. Routing and input-channel gathering are computed over the
+    full sequence before entering the recurrent loop.
     """
 
     def __init__(self,

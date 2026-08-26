@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Tuple, List, Union, Dict, Any
 import urllib.request
-
 import lightning as lit
 import numpy as np
 import pandas as pd

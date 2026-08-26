@@ -1,13 +1,11 @@
 """Base class for dynamic-sparse recurrent cells."""
-
 from dataclasses import replace
 from typing import Optional, Tuple
-
 import torch
 from torch import nn
-
 from dsrnn.nn.functional import BackwardRule, Implementation, masked_matmul
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
+
 
 # (mask, idx) pairs for the input and hidden channels
 MaskPair = Tuple[torch.Tensor, torch.Tensor]
@@ -15,9 +13,8 @@ RoutingOverride = Tuple[MaskPair, MaskPair]
 
 
 class DSRNNCell(nn.Module):
-    """Base class for dynamic-sparse recurrent cells.
-
-    Holds the input-channel and hidden-channel routers and computes the
+    """
+    Base class for dynamic-sparse recurrent cells. Holds the input-channel and hidden-channel routers and computes the
     per-timestep channel masks. Subclasses implement the gated state update.
     """
 
@@ -29,7 +26,8 @@ class DSRNNCell(nn.Module):
                  router_config: RouterConfig,
                  implementation: Implementation = "gathered",
                  share_context_projection: bool = False):
-        """Initialize the cell routers.
+        """
+        Initialize the cell routers.
 
         Args:
             input_size: Number of input channels.
@@ -52,7 +50,7 @@ class DSRNNCell(nn.Module):
 
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.implementation = implementation
+        self.implementation: Implementation = implementation
         self.share_context_projection = share_context_projection
         self._backward: BackwardRule = router_config.backward
 
@@ -72,7 +70,8 @@ class DSRNNCell(nn.Module):
         self.last_hidden_routing: Optional[RouterOutput] = None
 
     def compute_routing(self, x: torch.Tensor) -> Tuple[RouterOutput, RouterOutput]:
-        """Compute input and hidden channel masks for the current input.
+        """
+        Compute input and hidden channel masks for the current input.
 
         Args:
             x: Current cell input of shape (B, input_size).
@@ -86,7 +85,8 @@ class DSRNNCell(nn.Module):
         return self.last_input_routing, self.last_hidden_routing
 
     def compute_routing_batched(self, x: torch.Tensor) -> Tuple[RouterOutput, RouterOutput]:
-        """Compute routing for a flattened batch of inputs.
+        """
+        Compute routing for a flattened batch of inputs.
 
         Args:
             x: Flattened inputs of shape (N, input_size), e.g. N = B * T.
@@ -102,11 +102,11 @@ class DSRNNCell(nn.Module):
     def _resolve_masks(self,
                        x: torch.Tensor,
                        routing: Optional[RoutingOverride]) -> RoutingOverride:
-        """Return ((mask_x, idx_x), (mask_h, idx_h)) for this step.
+        """
+        Return ((mask_x, idx_x), (mask_h, idx_h)) for this step.
 
-        Computes routing from x when routing is None (storing the RouterOutputs
-        for analysis); otherwise returns the given precomputed masks without
-        storing them.
+        Computes routing from x when routing is None (storing the RouterOutputs for analysis); otherwise returns the
+        given precomputed masks without storing them.
 
         Args:
             x: Current cell input of shape (B, input_size).
@@ -126,7 +126,8 @@ class DSRNNCell(nn.Module):
                       idx: torch.Tensor,
                       weight: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Apply a masked linear map with the configured implementation.
+        """
+        Apply a masked linear map with the configured implementation.
 
         Args:
             x: Input activations of shape (B, I).

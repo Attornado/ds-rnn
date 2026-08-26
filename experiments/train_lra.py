@@ -1,27 +1,22 @@
-"""Train an S4-family model on a Long Range Arena task.
-
-One entry point covering the AAN, IMDb, sCIFAR-10, and ListOps tasks; per-task
-defaults are selected by ``--task``. An optional ``--config`` YAML (flat
-key: value) pre-loads defaults and any explicitly-passed flag overrides it.
+"""
+Train an S4-family model on a Long Range Arena task.
 
 Example (sCIFAR-10, DS-S4):
 
     python experiments/train_lra.py --task cifar --model_type dss4 \\
         --sparsity 0.9 --router_dim 16
 """
-
 import argparse
 import importlib
 import sys
 from typing import Any, Dict
-
 import lightning as lit
 import torch
 import yaml
 from lightning.pytorch.callbacks import ModelCheckpoint
-
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.lra import LRAModule
+
 
 # Per-task configuration. All use BatchNorm1d by default (norm_type="batch").
 TASKS: Dict[str, Dict[str, Any]] = {

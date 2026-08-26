@@ -1,18 +1,9 @@
-"""Wrappers adapting sequence models to Avalanche for continual learning.
-
-Kept out of ``dsrnn.training.__init__`` so ``avalanche`` stays an optional
-dependency (install the ``cl`` extra). The wrappers normalize input shapes
-(image tensors, flattened MNIST/CIFAR, optional patch-and-project or linear
-projection) and adapt models returning ``(sequence_output, state)`` to the
-logits-only interface Avalanche expects.
 """
-
-from typing import Optional
-
+Wrappers adapting sequence models to Avalanche for continual learning.
+"""
 import torch
 from torch import nn
 from einops.layers.torch import Rearrange
-
 from dsrnn.training.sequence import build_backbone
 
 try:
