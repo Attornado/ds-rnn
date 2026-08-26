@@ -118,6 +118,11 @@ def main() -> None:
                         help="If set, enable ModelCheckpoint into this directory.")
     parser.add_argument("--test_with_corruptions", action="store_true", default=False)
 
+    # Logging (default: no logger, results go to the CSV file)
+    parser.add_argument("--use_wandb", action="store_true", default=False)
+    parser.add_argument("--wandb_project", type=str, default="DS-RNN-LRA")
+    parser.add_argument("--wandb_entity", type=str, default=None)
+
     args = parser.parse_args()
 
     if args.config is not None:
@@ -195,9 +200,19 @@ def main() -> None:
         callbacks.append(ModelCheckpoint(dirpath=args.ckpt_dir,
                                          monitor="val/acc", mode="max"))
 
+    # Logger: none by default (results go to the CSV file); wandb opt-in.
+    logger = None
+    if args.use_wandb:
+        from lightning.pytorch.loggers.wandb import WandbLogger
+        sparsity_str = f"-sp{args.sparsity}" if args.model_type in ("dss4", "dsliqs4") else ""
+        run_name = (f"{args.model_type}(d={args.d_model},h={args.d_state})-"
+                    f"{args.task}{sparsity_str}-seed={args.seed}")
+        logger = WandbLogger(project=args.wandb_project, name=run_name,
+                             entity=args.wandb_entity, config=vars(args))
+
     devices = [int(d) for d in args.devices.split(",")]
     trainer_kwargs: Dict[str, Any] = dict(
-        accelerator="auto", devices=devices, logger=None,
+        accelerator="auto", devices=devices, logger=logger,
         callbacks=callbacks or None, max_epochs=epochs,
         enable_checkpointing=args.ckpt_dir is not None,
     )

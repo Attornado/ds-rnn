@@ -22,6 +22,10 @@ dependencies = [
     "ncps>=1.0",
     # dsrnn.nn.linear (TransposedLinear) uses opt_einsum.contract
     "opt-einsum>=3.3",
+    # dsrnn.nn.rnn.ssm.functional.hippo uses scipy.special
+    "scipy>=1.10",
+    # tests ship with the package and are meant to run out of the box
+    "pytest>=8.0",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +39,9 @@ data = [
     "torchvision>=0.16",
     "pandas>=2.0",
     "scikit-learn>=1.3",
+    "ucimlrepo>=0.7",
+    "requests>=2.31",
+    "pytorch-forecasting>=1.0",
 ]
 # Continual learning experiments (Avalanche-managed training loops).
 cl = [
@@ -48,12 +55,12 @@ ww = [
 wandb = [
     "wandb>=0.16",
 ]
-dev = [
-    "pytest>=8.0",
-]
 
 [tool.setuptools.packages.find]
 include = ["dsrnn*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Make the repo root importable so `pytest` works from the project root
+# without requiring an editable install.
+pythonpath = ["."]
