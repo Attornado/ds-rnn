@@ -1,20 +1,21 @@
 """Continual learning experiments (Avalanche-managed training loops).
 
-Faithful port of the old ``avalanche_training.py`` to the new ``dsrnn`` API.
-The model comes from a required LightningCLI-style YAML config (``--config``),
-with optional CLI overrides for the router fields (which changed name in the
-new API: ``gnn_router_cnf.init_args`` -> ``RouterConfig`` kwargs).
+Ported from the old ``avalanche_training.py`` to the new ``dsrnn`` API.
+Argparse-first: every setting is a CLI flag. An optional ``--config`` YAML
+(flat ``key: value`` pairs matching the flag names) pre-loads defaults; any
+explicitly-passed CLI flag overrides the YAML.
 
 Example (SplitMNIST, DS-LSTM, GEM):
 
-    python experiments/continual_learning.py --config configs/cl/dslstm.yaml \\
-        --benchmark splitmnist --strategy gem --epochs 2
+    python experiments/continual_learning.py \\
+        --benchmark splitmnist --model_type dslstm --hidden_size 128 \\
+        --sparsity 0.9 --strategy gem --epochs 2
 """
 
 import argparse
-import inspect
 import math
 import os
+import sys
 
 import lightning as lit
 import matplotlib.pyplot as plt
@@ -27,48 +28,13 @@ from torch.optim import SGD, AdamW
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.continual import build_cl_model
 
-# Old GNNRouterConfig field -> new RouterConfig field (rename only; fields that
-# no longer exist in the new config are dropped, see _router_kwargs_from_config).
-_ROUTER_KEY_MAP = {
-    "sparsity_level": "sparsity",
-    "in_channels": "context_dim",
-}
-
-
-def _router_kwargs_from_config(model_kwargs, hidden_size, input_size, args):
-    """Map the old gnn_router_cnf.init_args onto the new RouterConfig fields.
-
-    Renames the fields that changed, drops the ones that no longer exist, and
-    applies CLI overrides. Filtering is done against RouterConfig's actual
-    signature so this stays correct if the config grows new fields.
-    """
-    old_args = dict(
-        (model_kwargs.get("gnn_router_cnf", {}) or {}).get("init_args", {}) or {}
-    )
-    renamed = {_ROUTER_KEY_MAP.get(k, k): v for k, v in old_args.items()}
-
-    if args.sparsity is not None:
-        renamed["sparsity"] = args.sparsity
-    if args.context_dim is not None:
-        renamed["context_dim"] = args.context_dim
-    if args.router_backward is not None:
-        renamed["backward"] = args.router_backward
-    renamed.setdefault("num_channels", hidden_size)
-    renamed.setdefault("input_dim", input_size)
-
-    try:
-        accepted = set(inspect.signature(RouterConfig).parameters)
-    except (TypeError, ValueError):  # pragma: no cover
-        accepted = set(inspect.signature(RouterConfig.__init__).parameters)
-        accepted.discard("self")
-    dropped = sorted(set(renamed) - accepted)
-    if dropped:
-        print(f"[router-config] Dropping fields not in the new RouterConfig: {dropped}")
-    return {k: v for k, v in renamed.items() if k in accepted}
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+
+    # Config file (optional; CLI flags override it)
+    parser.add_argument("--config", type=str, default=None,
+                        help="Optional YAML with flat key: value defaults.")
 
     # Logging
     parser.add_argument("--use_wandb", action="store_true", default=False)
@@ -78,18 +44,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ckpt_path", type=str, default=None,
                         help="Path to save the model checkpoint")
 
-    # Model parameters
-    parser.add_argument("--config", type=str, required=True,
-                        help="Model YAML configuration (LightningCLI-like).")
+    # Model
+    parser.add_argument("--model_type", type=str, default="dslstm",
+                        choices=["lstm", "gru", "dslstm", "dsgru"])
+    parser.add_argument("--input_size", type=int, default=28)
+    parser.add_argument("--hidden_size", type=int, default=128)
+    parser.add_argument("--output_size", type=int, default=10)
+    parser.add_argument("--num_layers", type=int, default=1)
     parser.add_argument("--implementation", type=str, default="gathered",
                         choices=["gathered", "dense"])
-    # Optional router overrides (new RouterConfig field names)
-    parser.add_argument("--sparsity", type=float, default=None)
-    parser.add_argument("--context_dim", type=int, default=None)
-    parser.add_argument("--router_backward", type=str, default=None,
+    # DS router (only used for ds* model types)
+    parser.add_argument("--sparsity", type=float, default=0.9)
+    parser.add_argument("--context_dim", type=int, default=4)
+    parser.add_argument("--router_backward", type=str, default="selected_only",
                         choices=["selected_only", "ste"])
 
-    # Training parameters
+    # Training
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str,
                         default="cuda" if torch.cuda.is_available() else "cpu")
@@ -102,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--momentum", type=float, default=0.9)
 
-    # Strategy parameters
+    # Strategy
     parser.add_argument("--strategy", type=str, default=["gem"], nargs="+",
                         choices=["none", "gem", "ewc", "replay", "reservoir"])
     parser.add_argument("--gem_patterns", type=int, default=256)
@@ -116,21 +86,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replay_mem_size", type=int, default=1000)
     parser.add_argument("--use_task_embedding", action="store_true", default=False)
 
-    # Benchmark parameters
+    # Benchmark
     parser.add_argument("--n_experiences", type=int, default=5)
     parser.add_argument("--benchmark", type=str, default="splitmnist",
                         choices=["splitmnist", "permmnist", "splitfmnist",
                                  "splitcifar10", "splitcifar10gray", "rotmnist",
                                  "splithar", "splitsyntcon", "splitdigits"])
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Optional YAML defaults; any explicitly-set CLI flag wins.
+    if args.config is not None:
+        with open(args.config) as f:
+            file_cfg = yaml.safe_load(f) or {}
+        explicitly_set = {t[2:].split("=")[0] for t in sys.argv[1:]
+                          if t.startswith("--")}
+        for key, value in file_cfg.items():
+            if hasattr(args, key) and key not in explicitly_set:
+                setattr(args, key, value)
+
+    return args
 
 
-def make_benchmark(args, config):
+def make_benchmark(args):
     """Construct the Avalanche benchmark and the input-shaping settings.
 
-    Mutates ``config["model"]["input_size"]`` for the CIFAR benchmarks,
-    matching the original script.
+    May adjust ``args.input_size`` for the CIFAR benchmarks, matching the
+    original script.
     """
     from avalanche.benchmarks import nc_benchmark
     from avalanche.benchmarks.classic import (
@@ -151,12 +133,12 @@ def make_benchmark(args, config):
     elif args.benchmark == "splitcifar10":
         patch_and_project, patch_dim, in_channels = True, 16, 3
         # patch-and-project maps each patch to the model width
-        config["model"]["input_size"] = config["model"]["hidden_size"]
+        args.input_size = args.hidden_size
         benchmark = SplitCIFAR10(n_experiences=args.n_experiences, seed=args.seed)
     elif args.benchmark == "splitcifar10gray":
         mean_gs_cifar10 = 0.48086121678352356
         std_gs_cifar10 = 0.23919078707695007
-        config["model"]["input_size"] = 32
+        args.input_size = 32
         train_transform = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
@@ -204,36 +186,6 @@ def make_benchmark(args, config):
         raise ValueError(f"Unsupported benchmark: {args.benchmark}.")
 
     return benchmark, patch_and_project, patch_dim, project, in_channels
-
-
-def get_model_from_config(config, args, *, patch_and_project=False, project=False,
-                          patch_dim=None, in_channels=1):
-    """Build the CL model from the YAML config (new RouterConfig mapping)."""
-    model_cfg = config["model"]
-    model_type = model_cfg["model_type"].lower()
-    model_kwargs = model_cfg.get("model_kwargs", {}) or {}
-
-    router_config = None
-    if model_type in ("dslstm", "dsgru"):
-        router_kwargs = _router_kwargs_from_config(
-            model_kwargs, model_cfg["hidden_size"], model_cfg["input_size"], args)
-        router_config = RouterConfig(**router_kwargs)
-
-    return build_cl_model(
-        model_type,
-        input_size=model_cfg["input_size"],
-        hidden_size=model_cfg["hidden_size"],
-        output_size=model_cfg["output_size"],
-        num_layers=model_kwargs.get("num_layers", 1),
-        router_config=router_config,
-        implementation=args.implementation,
-        use_task_embedding=args.use_task_embedding,
-        n_tasks=args.n_experiences,
-        patch_and_project=patch_and_project,
-        project=project,
-        patch_dim=16 if patch_dim is None else patch_dim,
-        in_channels=in_channels,
-    )
 
 
 def make_strategy(args, model, optimizer, criterion, eval_plugin, device):
@@ -408,7 +360,7 @@ def _plot_metric_pair(results_list, substrs, ylabel, title_prefix,
         plt.close(fig2)
 
 
-def plot_results(results_list, config, args, save_folder="_plots/cl_plots"):
+def plot_results(results_list, args, save_folder="_plots/cl_plots"):
     """Plot stream accuracy/loss, per-task accuracy, forgetting, BWT, FWT."""
     if save_folder:
         os.makedirs(save_folder, exist_ok=True)
@@ -416,7 +368,7 @@ def plot_results(results_list, config, args, save_folder="_plots/cl_plots"):
 
     experiences = range(1, len(results_list) + 1)
     strategy_label = args.strategy[0] if len(args.strategy) == 1 else "+ ".join(args.strategy)
-    model_type = config["model"]["model_type"]
+    model_type = args.model_type
 
     # --- 1. Stream accuracy ---
     acc_stream_key = [k for k in results_list[0].keys() if "Top1_Acc_Stream" in k][0]
@@ -496,16 +448,32 @@ def main() -> None:
     lit.seed_everything(seed=args.seed)
     device = torch.device(args.device)
 
-    with open(args.config) as stream:
-        config = yaml.safe_load(stream)
+    benchmark, patch_and_project, patch_dim, project, in_channels = make_benchmark(args)
 
-    benchmark, patch_and_project, patch_dim, project, in_channels = \
-        make_benchmark(args, config)
+    router_config = None
+    if args.model_type in ("dslstm", "dsgru"):
+        router_config = RouterConfig(
+            num_channels=args.hidden_size,
+            input_dim=args.input_size,
+            context_dim=args.context_dim,
+            sparsity=args.sparsity,
+            backward=args.router_backward,
+        )
 
-    model = get_model_from_config(
-        config, args,
-        patch_and_project=patch_and_project, patch_dim=patch_dim,
-        in_channels=in_channels, project=project,
+    model = build_cl_model(
+        args.model_type,
+        input_size=args.input_size,
+        hidden_size=args.hidden_size,
+        output_size=args.output_size,
+        num_layers=args.num_layers,
+        router_config=router_config,
+        implementation=args.implementation,
+        use_task_embedding=args.use_task_embedding,
+        n_tasks=args.n_experiences,
+        patch_and_project=patch_and_project,
+        project=project,
+        patch_dim=16 if patch_dim is None else patch_dim,
+        in_channels=in_channels,
     ).to(device)
 
     if args.optimizer == "adamw":
@@ -526,30 +494,15 @@ def main() -> None:
     loggers: list = [InteractiveLogger()]
     if args.use_wandb:
         from avalanche.logging import WandBLogger
-        param_dict = vars(args)
-        param_dict["model"] = {
-            "model_type": config["model"]["model_type"],
-            "input_size": config["model"]["input_size"],
-            "hidden_size": config["model"]["hidden_size"],
-            "output_size": config["model"]["output_size"],
-        }
-        sparsity_string = ""
-        model_kwargs = config["model"].get("model_kwargs", {}) or {}
-        if "num_layers" in model_kwargs:
-            param_dict["model"]["num_layers"] = model_kwargs["num_layers"]
-        if "gnn_router_cnf" in model_kwargs:
-            router_args = model_kwargs["gnn_router_cnf"]["init_args"]
-            param_dict["model"]["router_config"] = router_args
-            sparsity_string = f"-sp{router_args['sparsity_level']}"
-
-        model_str = f"{config['model']['model_type']}({config['model']['hidden_size']}){sparsity_string}"
+        sparsity_string = f"-sp{args.sparsity}" if args.model_type in ("dslstm", "dsgru") else ""
+        model_str = f"{args.model_type}({args.hidden_size}){sparsity_string}"
         strategy_str = "-".join(args.strategy)
         task_emb_str = "-task_emb" if args.use_task_embedding else ""
         run_name = f"{model_str}-{strategy_str}-{args.benchmark}{task_emb_str}({args.n_experiences})"
         loggers.append(WandBLogger(
             project_name=args.wandb_project, run_name=run_name,
             log_artifacts=False, path="_tmp/_avalanchecheckpoints", save_code=True,
-            params={"entity": args.wandb_entity, "config": param_dict}))
+            params={"entity": args.wandb_entity, "config": vars(args)}))
 
     eval_plugin = EvaluationPlugin(
         accuracy_metrics(minibatch=False, epoch=True, experience=True, stream=True),
@@ -585,7 +538,7 @@ def main() -> None:
             )
 
     if len(results) > 0:
-        plot_results(results, config, args, save_folder=args.plot_save_dir)
+        plot_results(results, args, save_folder=args.plot_save_dir)
 
 
 if __name__ == "__main__":
