@@ -1,7 +1,8 @@
 """Train a sequence model on the classification/regression benchmarks.
 
 Uniform argparse entry point; an optional YAML config pre-loads defaults and
-any flag overrides it.
+any flag overrides it. The task registry lives in ``dsrnn.training.tasks`` and
+is shared with the pruning baseline.
 
 Example (SeqMNIST, DS-LSTM, paper hyperparameters):
 
@@ -11,6 +12,7 @@ Example (SeqMNIST, DS-LSTM, paper hyperparameters):
 """
 
 import argparse
+import sys
 from typing import Any, Dict
 
 import torch
@@ -19,105 +21,9 @@ from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
 
-from dsrnn.training.sequence import SequenceModule
 from dsrnn.training.scheduler import LRSchedulerConfig
-
-# Task registry: maps a task name to its datamodule path, constructor kwargs,
-# and the model/loss/metric settings. Datamodule class names match the old
-# connectomencps.data layout; verify against dsrnn.data if renamed.
-TASKS: Dict[str, Dict[str, Any]] = {
-    "seqmnist": {
-        "data": ("dsrnn.data.classification", "SequentialMNISTDataModule"),
-        "data_kwargs": {"root": "_data/mnist", "val_split": 0.1,
-                        "sequential_order": "scan", "subseq_len": 28},
-        "input_size": 28, "output_size": 10, "return_sequences": False,
-        "loss_type": "ce",
-        "metric_params": {
-            "accuracy": {"average": "macro", "task": "multiclass", "num_classes": 10},
-            "f1": {"average": "macro", "task": "multiclass", "num_classes": 10},
-            "ece": {"task": "multiclass", "num_classes": 10, "norm": "l1"},
-            "mce": {"task": "multiclass", "num_classes": 10},
-        },
-    },
-    "har": {
-        "data": ("dsrnn.data.classification", "HARDataModule"),
-        "data_kwargs": {"data_path": "_data/har", "val_split": 0.1,
-                        "test_split": 0.15, "sequence_length": 32},
-        "input_size": 561, "output_size": 6, "return_sequences": True,
-        "loss_type": "ce",
-        "metric_params": {
-            "accuracy": {"average": "macro", "task": "multiclass", "num_classes": 6},
-            "f1": {"average": "macro", "task": "multiclass", "num_classes": 6},
-        },
-    },
-    "gesture": {
-        "data": ("dsrnn.data.classification", "HandGestureDataModule"),
-        "data_kwargs": {"data_path": "_data/gesture", "val_split": 0.15,
-                        "test_split": 0.15, "sequence_length": 32},
-        "input_size": 32, "output_size": 5, "return_sequences": True,
-        "loss_type": "ce",
-        "metric_params": {
-            "accuracy": {"average": "macro", "task": "multiclass", "num_classes": 5},
-            "f1": {"average": "macro", "task": "multiclass", "num_classes": 5},
-        },
-    },
-    "occupancy": {
-        "data": ("dsrnn.data.classification", "OccupancyDataModule"),
-        "data_kwargs": {"data_path": "_data/occupancy", "val_split": 0.1,
-                        "test_split": 0.15, "sequence_length": 32},
-        "input_size": 5, "output_size": 1, "return_sequences": True,
-        "loss_type": "bce",
-        "metric_params": {
-            "accuracy": {"task": "binary"},
-            "f1": {"task": "binary"},
-        },
-    },
-    "ozone": {
-        "data": ("dsrnn.data.classification", "OzoneDataModule"),
-        "data_kwargs": {"data_path": "_data/ozone", "val_split": 0.1,
-                        "test_split": 0.15, "sequence_length": 32},
-        "input_size": 72, "output_size": 1, "return_sequences": True,
-        "loss_type": "bce",
-        "metric_params": {
-            "accuracy": {"task": "binary"},
-            "f1": {"task": "binary"},
-        },
-    },
-    "traffic": {
-        "data": ("dsrnn.data.classification", "TrafficDataModule"),
-        "data_kwargs": {"data_path": "_data/traffic", "val_split": 0.1,
-                        "test_split": 0.15, "sequence_length": 32},
-        "input_size": 7, "output_size": 1, "return_sequences": True,
-        "loss_type": "mse",
-        "metric_params": {"mse": {}, "mae": {}},
-    },
-    "power": {
-        "data": ("dsrnn.data.classification", "PowerConsumptionDataModule"),
-        "data_kwargs": {"data_path": "_data/power", "val_split": 0.1,
-                        "test_split": 0.15, "sequence_length": 32},
-        "input_size": 6, "output_size": 1, "return_sequences": True,
-        "loss_type": "mse",
-        "metric_params": {"mse": {}, "mae": {}},
-    },
-    "cheetah": {
-        "data": ("dsrnn.data.cheetah", "CheetahDataModule"),
-        "data_kwargs": {"data_path": "_data/cheetah", "sequence_length": 32},
-        "input_size": 17, "output_size": 17, "return_sequences": True,
-        "loss_type": "mse",
-        "metric_params": {"mse": {}, "mae": {}},
-    },
-}
-
-
-def _load_datamodule(task: str, batch_size: int, num_workers: int):
-    import importlib
-    cfg = TASKS[task]
-    module_path, class_name = cfg["data"]
-    cls = getattr(importlib.import_module(module_path), class_name)
-    kwargs = dict(cfg["data_kwargs"])
-    kwargs.update({"batch_size": batch_size, "num_workers": num_workers,
-                   "pin_memory": False})
-    return cls(**kwargs)
+from dsrnn.training.sequence import SequenceModule
+from dsrnn.training.tasks import TASKS, load_datamodule
 
 
 def main() -> None:
@@ -160,8 +66,8 @@ def main() -> None:
     if args.config is not None:
         with open(args.config) as f:
             file_cfg = yaml.safe_load(f) or {}
-        import sys
-        explicitly_set = {token[2:] for token in sys.argv[1:] if token.startswith("--")}
+        explicitly_set = {token[2:].split("=")[0] for token in sys.argv[1:]
+                          if token.startswith("--")}
         for key, value in file_cfg.items():
             if hasattr(args, key) and key not in explicitly_set:
                 setattr(args, key, value)
@@ -204,8 +110,8 @@ def main() -> None:
         metric_params=task_cfg["metric_params"],
     )
 
-    dm = _load_datamodule(args.task, batch_size=args.batch_size,
-                          num_workers=args.num_workers)
+    dm = load_datamodule(args.task, batch_size=args.batch_size,
+                         num_workers=args.num_workers)
 
     if args.use_wandb:
         from lightning.pytorch.loggers.wandb import WandbLogger
