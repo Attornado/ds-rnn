@@ -1,7 +1,7 @@
 """Metric registry.
 
-Faithful port of ``connectomencps.nn.metrics``: torchmetrics functionals plus
-the custom dice / Brier / adaptive-ECE metrics used by the benchmark configs.
+Torchmetrics functionals plus custom dice / Brier / adaptive-ECE metrics,
+resolved by name.
 """
 
 import functools

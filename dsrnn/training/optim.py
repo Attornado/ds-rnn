@@ -1,9 +1,8 @@
-"""Optimizer construction with parameter-group support.
+"""Optimizers with parameter-group support.
 
-Streamlined port of the old ``connectomencps.nn.optim``: the ``OptimizerType``
-enum is replaced by plain lowercase strings, and parameter grouping (previously
-hard-coded inside each LightningModule's ``configure_optimizers``) is factored
-out here so both the sequence module and the S4/LRA modules share one path.
+Lowercase-string optimizer dispatch plus a helper to split model parameters
+into groups by name pattern (e.g. to give SSM kernel parameters a lower
+learning rate and zero weight decay).
 """
 
 from typing import Any, Dict, Iterable, List, Tuple
@@ -37,12 +36,11 @@ def build_param_groups(
 
     - the group named ``"all"`` is the catch-all fallback;
     - otherwise the group name is used as a regex searched against the
-      parameter name (substring matching is a special case, so the old
-      behaviour is preserved);
+      parameter name;
     - a group dict may instead provide an explicit ``"pattern"`` key, which is
       then used as the regex and popped before the kwargs reach the optimizer.
 
-    Example (S4/LRA kernel params at lower LR and no weight decay)::
+    Example (SSM kernel params at lower LR and no weight decay)::
 
         optimizer_kwargs = {
             "ssm": {"pattern": r"kernel|log_dt|\\bB\\b|\\bC\\b|\\bP\\b",
@@ -73,7 +71,6 @@ def build_param_groups(
                 )
             groups["all"]["params"].append(param)
 
-    # Preserve declaration order, but drop empty non-fallback groups.
     return [g for name, g in groups.items() if g["params"] or name == "all"]
 
 
@@ -116,7 +113,6 @@ def build_optimizer(
         groups = build_param_groups(params, optimizer_kwargs)
         return cls(params=groups)
 
-    # Flat path: unwrap (name, param) tuples if given.
     if named:
         params = [p for _, p in params]
     return cls(params=params, **optimizer_kwargs)

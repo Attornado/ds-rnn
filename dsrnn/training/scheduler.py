@@ -1,8 +1,7 @@
 """Learning-rate scheduler construction.
 
-Streamlined port of ``connectomencps.nn.scheduler``: the ``LRSchedulerType``
-enum becomes plain lowercase strings; the defaults table, the OneCycleLR
-``total_steps`` derivation and the CyclicLR base/max-LR derivation are kept.
+String-dispatched scheduler builders with per-type defaults, plus the
+Lightning scheduler config container.
 """
 
 from dataclasses import dataclass, field
@@ -25,8 +24,8 @@ _SCHEDULER_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "cosine": {"T_max": 100, "eta_min": 0.0},
     "cosine_restarts": {"T_0": 50, "T_mult": 1, "eta_min": 0.0},
     "one_cycle": {
-        "max_lr": None,       # defaults to optimizer lr
-        "total_steps": None,  # epochs * steps_per_epoch, derived below
+        "max_lr": None,
+        "total_steps": None,
         "pct_start": 0.3,
         "anneal_strategy": "cos",
         "div_factor": 25.0,
@@ -45,7 +44,7 @@ _SCHEDULER_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "exponential": {"gamma": 0.95},
     "linear": {"start_factor": 1e-3, "end_factor": 1.0, "total_iters": 10},
     "cyclic": {
-        "base_lr": None,  # derived from optimizer lr
+        "base_lr": None,
         "max_lr": None,
         "step_size_up": 2000,
         "mode": "triangular2",
@@ -67,7 +66,7 @@ class LRSchedulerConfig:
         interval: ``"step"`` or ``"epoch"`` (Lightning).
         frequency: steps/epochs between updates (Lightning).
         monitor: metric for ``reduce_on_plateau``; forced to ``None`` for the
-            other schedulers, matching the old behaviour.
+            other schedulers.
     """
 
     scheduler_type: str = "none"
