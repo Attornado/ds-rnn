@@ -1,11 +1,10 @@
 """Train an S4-family model on a Long Range Arena task.
 
-Consolidates the four original per-task scripts (train_s4_aan / _imdb /
-_lra_cifar / _lra_listops) into one argparse entry point; per-task defaults
-match the original script for that dataset. An optional ``--config`` YAML
-(flat key: value) pre-loads defaults; any explicitly-passed flag overrides it.
+One entry point covering the AAN, IMDb, sCIFAR-10, and ListOps tasks; per-task
+defaults are selected by ``--task``. An optional ``--config`` YAML (flat
+key: value) pre-loads defaults and any explicitly-passed flag overrides it.
 
-Example (sCIFAR-10, DS-S4, paper hyperparameters):
+Example (sCIFAR-10, DS-S4):
 
     python experiments/train_lra.py --task cifar --model_type dss4 \\
         --sparsity 0.9 --router_dim 16
@@ -24,8 +23,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.lra import LRAModule
 
-# Per-task configuration matching the original training scripts.
-# All four original scripts used BatchNorm1d, hence norm_type="batch".
+# Per-task configuration. All use BatchNorm1d by default (norm_type="batch").
 TASKS: Dict[str, Dict[str, Any]] = {
     "aan": {
         "data": ("dsrnn.data.lra", "AAN"),
@@ -86,7 +84,7 @@ def main() -> None:
     parser.add_argument("--n_layers", type=int, default=4)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--norm_type", type=str, default=None, choices=["batch", "layer"],
-                        help="Defaults to the original script's choice for the task.")
+                        help="Defaults to the per-task setting.")
     parser.add_argument("--liquid_degree", type=int, default=2)
 
     # DS-S4 router

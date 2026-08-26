@@ -1,10 +1,9 @@
 """Train a sequence model on the classification/regression benchmarks.
 
-Uniform argparse entry point; an optional YAML config pre-loads defaults and
-any flag overrides it. The task registry lives in ``dsrnn.training.tasks`` and
-is shared with the pruning baseline.
+Argparse entry point; an optional YAML config pre-loads defaults and any
+explicitly-passed flag overrides it.
 
-Example (SeqMNIST, DS-LSTM, paper hyperparameters):
+Example (sequential MNIST, DS-LSTM):
 
     python experiments/train_classification.py \\
         --task seqmnist --model_type dslstm --hidden_size 128 \\

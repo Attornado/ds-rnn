@@ -1,9 +1,10 @@
 """Structured-sparsity ablation baselines (SNIP / learned-global / random).
 
-Thin entry point over ``dsrnn.training.ablation``. Argparse-first; optional
-``--config`` YAML (flat key: value) overridden by any flag.
+Thin entry point over ``dsrnn.training.ablation``. An optional ``--config``
+YAML (flat key: value) pre-loads defaults and any explicitly-passed flag
+overrides it.
 
-Example (SeqMNIST, LSTM, random dynamic routing at 90% sparsity):
+Example (sequential MNIST, LSTM, random dynamic routing at 90% sparsity):
 
     python experiments/train_ablation_masking.py --task seqmnist \\
         --model_type lstm --masker random --sparsity 0.9

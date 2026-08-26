@@ -1,7 +1,7 @@
 """Train a shared (DS-)RNN jointly on multiple tasks.
 
-Ported from the old ``train_multitask.py`` to the new stack. Argparse-first;
-optional ``--config`` YAML (flat key: value) overridden by any flag.
+Argparse entry point; an optional ``--config`` YAML (flat key: value)
+pre-loads defaults and any explicitly-passed flag overrides it.
 
 Example (natural multi-task set, DS-LSTM, uncertainty weighting):
 
@@ -76,8 +76,7 @@ def build_model(tasks: List[str], model_type: str, hidden_size: int,
             num_channels=hidden_size, input_dim=hidden_size,
             context_dim=router_dim, n_layers=n_router_layers,
             sparsity=dynamic_sparsity, backward=router_backward)}
-        # DSLTCCell only forbids gathered+STE; gathered+selected_only is fine,
-        # dense is required only if the user explicitly selects ste.
+        # DSLTCCell only forbids gathered+STE; dense is required only with ste.
         if model_type == "dsltc" and router_backward == "ste":
             implementation = "dense"
     else:

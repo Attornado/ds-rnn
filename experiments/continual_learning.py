@@ -1,9 +1,8 @@
 """Continual learning experiments (Avalanche-managed training loops).
 
-Ported from the old ``avalanche_training.py`` to the new ``dsrnn`` API.
-Argparse-first: every setting is a CLI flag. An optional ``--config`` YAML
-(flat ``key: value`` pairs matching the flag names) pre-loads defaults; any
-explicitly-passed CLI flag overrides the YAML.
+Argparse entry point: every setting is a CLI flag. An optional ``--config``
+YAML (flat ``key: value`` pairs matching the flag names) pre-loads defaults and
+any explicitly-passed CLI flag overrides it.
 
 Example (SplitMNIST, DS-LSTM, GEM):
 
@@ -111,8 +110,7 @@ def parse_args() -> argparse.Namespace:
 def make_benchmark(args):
     """Construct the Avalanche benchmark and the input-shaping settings.
 
-    May adjust ``args.input_size`` for the CIFAR benchmarks, matching the
-    original script.
+    May adjust ``args.input_size`` for the CIFAR benchmarks.
     """
     from avalanche.benchmarks import nc_benchmark
     from avalanche.benchmarks.classic import (
@@ -370,7 +368,7 @@ def plot_results(results_list, args, save_folder="_plots/cl_plots"):
     strategy_label = args.strategy[0] if len(args.strategy) == 1 else "+ ".join(args.strategy)
     model_type = args.model_type
 
-    # --- 1. Stream accuracy ---
+    # Stream accuracy
     acc_stream_key = [k for k in results_list[0].keys() if "Top1_Acc_Stream" in k][0]
     accuracies = [r[acc_stream_key] for r in results_list]
     plt.figure(figsize=(10, 6))
@@ -391,7 +389,7 @@ def plot_results(results_list, args, save_folder="_plots/cl_plots"):
         plt.show()
     plt.close()
 
-    # --- 2. Stream loss ---
+    # Stream loss
     loss_stream_key = [k for k in results_list[0].keys() if "Loss_Stream" in k]
     if loss_stream_key:
         losses = [r[loss_stream_key[0]] for r in results_list]
@@ -412,7 +410,7 @@ def plot_results(results_list, args, save_folder="_plots/cl_plots"):
             plt.show()
         plt.close()
 
-    # --- 3. Per-task accuracy (forgetting analysis) ---
+    # Per-task accuracy (forgetting analysis)
     plt.figure(figsize=(12, 7))
     last_res = results_list[-1]
     exp_keys = sorted(k for k in last_res.keys() if "Top1_Acc_Exp" in k)
@@ -433,7 +431,7 @@ def plot_results(results_list, args, save_folder="_plots/cl_plots"):
         plt.show()
     plt.close()
 
-    # --- 4/5/6. Forgetting, BWT, FWT (stream + per-experience) ---
+    # Forgetting, BWT, FWT (stream + per-experience)
     _plot_metric_pair(results_list, ["forget"], "Forgetting", "Forgetting",
                       model_type, strategy_label, save_folder)
     _plot_metric_pair(results_list, ["bwt"], "BWT", "BWT",

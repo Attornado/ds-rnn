@@ -1,9 +1,9 @@
 """Train a (DS-)RNN on a forecasting benchmark (pytorch_forecasting).
 
-Argparse-first; optional ``--config`` YAML (flat key: value) pre-loads
-defaults and any explicitly-passed flag overrides it.
+Argparse entry point; an optional YAML config pre-loads defaults and any
+explicitly-passed flag overrides it.
 
-Example (ETTh1, DS-LSTM, paper setup: encoder 168, prediction 24):
+Example (ETTh1, DS-LSTM, encoder 168 / prediction 24):
 
     python experiments/train_forecasting.py --dataset etth1 \\
         --model_type dslstm --hidden_size 64 --sparsity 0.9

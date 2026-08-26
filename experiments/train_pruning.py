@@ -1,10 +1,9 @@
 """RigL dynamic-sparse-training baseline.
 
-Ported from the old ``train_pruning.py``, keeping only RigL (the IMP /
-lottery-ticket path was not part of the paper and was removed). Argparse-first;
-optional ``--config`` YAML (flat key: value) overridden by any flag.
+Argparse entry point; an optional YAML config pre-loads defaults and any
+explicitly-passed flag overrides it.
 
-Example (SeqMNIST, GRU, RigL at 90% sparsity):
+Example (sequential MNIST, GRU, RigL at 90% sparsity):
 
     python experiments/train_pruning.py --task seqmnist --model_type gru \\
         --sparsity 0.9

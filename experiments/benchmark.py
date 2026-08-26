@@ -1,18 +1,13 @@
-"""Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs dense LSTM.
+"""Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs a dense LSTM.
 
-Reproduces the data behind the paper's efficiency figure (Fig. 3):
-  (a) FLOPs and runtime as a function of hidden size (fixed sequence length)
-  (b) FLOPs and runtime as a function of sequence length (fixed hidden size)
+Reproduces the data behind the efficiency figure: FLOPs and runtime as a
+function of hidden size (fixed sequence length) and of sequence length (fixed
+hidden size), at fixed batch size, input size, and sparsity. Times the full
+forward pass (routing, top-k selection, and gathering included).
 
-All measurements use batch size 64, input size 32, sparsity 0.9, router width
-R=4, and time the full forward pass (router + top-k + gather). The dense
-baseline is an eager LSTM loop (``NaiveLSTM``), which is the apples-to-apples
-reference: both it and ``DSLSTM(implementation="gathered")`` are per-timestep
-loops, so the difference is exactly the routing + gathering overhead the
-figure reports.
-
-The measurement harness (profiler FLOPs + steady-state runtime) is adapted
-from compare_implementations.py; the old DSLSTMGathered reference is dropped.
+The dense baseline is an eager LSTM loop (``NaiveLSTM``): both it and
+``DSLSTM(implementation="gathered")`` are per-timestep loops, so the gap
+isolates the routing + gathering overhead.
 
 Example (both sweeps, write CSV + figure):
 
@@ -24,7 +19,7 @@ import argparse
 import csv
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
@@ -33,10 +28,6 @@ import torch.nn.functional as F
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.nn.router import RouterConfig
 
-
-# ---------------------------------------------------------------------------
-# Dense eager LSTM reference (standard LSTM equations, per-timestep loop).
-# ---------------------------------------------------------------------------
 
 class NaiveLSTMCell(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -97,10 +88,6 @@ class NaiveLSTM(nn.Module):
         return out, (h, c)
 
 
-# ---------------------------------------------------------------------------
-# Measurement harness (from compare_implementations.py).
-# ---------------------------------------------------------------------------
-
 def synchronize(device):
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -127,10 +114,6 @@ def flops(model, x):
             model(x)
         return int(sum(event.flops for event in prof.key_averages()))
 
-
-# ---------------------------------------------------------------------------
-# Model construction + sweep.
-# ---------------------------------------------------------------------------
 
 def build_models(D: int, H: int, sparsity: float, router_dim: int,
                  device: torch.device) -> Dict[str, nn.Module]:
