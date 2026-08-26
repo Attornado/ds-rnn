@@ -1,8 +1,7 @@
 """Forecasting LightningModule built on pytorch_forecasting.
 
 Kept out of ``dsrnn.training.__init__`` so ``pytorch_forecasting`` stays an
-optional dependency (install the ``data`` extra). Ported from the old
-``connectomencps.nn.sequence.forecast``.
+optional dependency (install the ``data`` extra).
 """
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -103,14 +102,10 @@ class ForecastModule(pf.BaseModelWithCovariates):
     def _extract_final_hidden(self,
                               outputs: torch.Tensor,
                               state) -> torch.Tensor:
-        """Return the final hidden state of shape (B, h_dim).
-
-        Handles dense torch states (num_layers, B, H) -> top layer, and the
-        new single-layer DS models' 2D (B, H) states as-is.
-        """
+        """Return the final hidden state of shape (B, h_dim)."""
         if isinstance(state, tuple):          # LSTM: (h_n, c_n)
             h_n = state[0]
-        elif isinstance(state, torch.Tensor):  # GRU / DS single-state
+        elif isinstance(state, torch.Tensor):  # GRU / single-state
             h_n = state
         else:
             h_n = None
@@ -140,11 +135,10 @@ class ForecastModule(pf.BaseModelWithCovariates):
 
 
 class ForecastPruningModule(ForecastModule):
-    """ForecastModule with pruning-mask enforcement hooks (for RigL/IMP)."""
+    """ForecastModule with pruning-mask enforcement hooks (for RigL)."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Attached externally before training; no-op until then.
         self.masks: Dict[str, Optional[torch.Tensor]] = {}
 
     def apply_masks(self) -> None:

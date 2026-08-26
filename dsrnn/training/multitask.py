@@ -1,10 +1,9 @@
 """Multi-task LightningModule: one shared backbone with per-task heads.
 
-Ported from ``connectomencps.nn.sequence.multitask``. A single recurrent
-backbone (dense or dynamic-sparse, via ``build_backbone``) is shared across
-tasks; each task gets its own input projection and output head, and a task
-embedding conditions the shared backbone. Per-task losses are combined through
-a task-weighting module (uncertainty / fixed / equal).
+A single recurrent backbone (dense or dynamic-sparse, via ``build_backbone``)
+is shared across tasks; each task gets its own input projection and output
+head, and a task embedding conditions the shared backbone. Per-task losses are
+combined through a task-weighting module (uncertainty / fixed / equal).
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -47,7 +46,7 @@ class UncertaintyTaskWeighting(nn.Module):
 
 
 class FixedTaskWeighting(nn.Module):
-    """Normalized fixed per-task weights (baseline / ablation)."""
+    """Normalized fixed per-task weights."""
 
     def __init__(self, task_names: List[str], weights: List[float]):
         super().__init__()
@@ -88,13 +87,10 @@ class MultitaskModule(lit.LightningModule):
         model_kwargs = model_kwargs or {}
         h_dim = hidden_size
 
-        # Task embedding
         task_embedding_dim = max(task_embedding_dim, 0)
         self.task_embedding = nn.Embedding(
             len(self.tasks), task_embedding_dim if task_embedding_dim > 0 else h_dim)
 
-        # Per-task input projections (map to h_dim - task_embedding_dim; the
-        # task embedding is concatenated to reach h_dim, the backbone's input)
         self.input_heads = nn.ModuleDict()
         if shared_in_head:
             max_inp = max(cfg["input_size"] for cfg in task_configs.values())
@@ -106,13 +102,11 @@ class MultitaskModule(lit.LightningModule):
                 self.input_heads[task] = nn.Linear(cfg["input_size"],
                                                    h_dim - task_embedding_dim)
 
-        # Shared backbone (its input is h_dim: projected input + task embedding)
         self.model = build_backbone(model_type, input_size=hidden_size,
                                     hidden_size=hidden_size, batch_first=batch_first,
                                     implementation=implementation,
                                     model_kwargs=model_kwargs)
 
-        # Per-task output heads
         self.output_heads = nn.ModuleDict()
         if shared_out_head:
             max_out = max(cfg["output_size"] for cfg in task_configs.values())
@@ -123,7 +117,6 @@ class MultitaskModule(lit.LightningModule):
             for task, cfg in task_configs.items():
                 self.output_heads[task] = nn.Linear(h_dim, cfg["output_size"])
 
-        # Per-task losses
         self.losses = nn.ModuleDict()
         for task, cfg in task_configs.items():
             lt = cfg["loss_type"]
@@ -140,7 +133,6 @@ class MultitaskModule(lit.LightningModule):
             else:
                 raise ValueError(f"Unknown loss type: {lt}")
 
-        # Per-task metrics
         self.metrics = nn.ModuleDict()
         for task, cfg in task_configs.items():
             m = nn.ModuleDict()

@@ -1,18 +1,11 @@
 """LRA LightningModule for the S4 model family (S4 / DS-S4 / Liquid variants).
 
-This module is intentionally separate from the RNN/DSRNN stack: it is built
-only from ``dsrnn.nn.dss4.DSS4`` blocks and shares nothing with the recurrent
-cells or the DSRNN wrapper.
-
-A single ``LRAModule`` unifies the three wrapper classes used by the original
-per-dataset scripts (``RNNClassifier``, ``S4LRAClassifier``, ``LRAModule``),
-which all share the same block structure (norm -> S4 -> dropout -> GELU ->
-linear -> residual) and all used BatchNorm1d. ``norm_type`` selects
-batch/layer norm; the default is batch, matching the original scripts.
-
-Dense S4 is ``DSS4(router_config=None)``: with no router the layer applies no
-mask, so the same class covers "s4" (dense) and "dss4" (dynamic-sparse), with
-"liqs4"/"dsliqs4" adding the liquid kernel.
+A single ``LRAModule`` unifies S4-based classification: an input embedding or
+projection feeds a stack of S4 residual blocks (norm -> S4 -> dropout -> GELU
+-> linear -> residual), followed by pooling and a linear head. Dense S4 is
+``DSS4(router_config=None)`` (no router, no mask); "dss4" adds dynamic-sparse
+routing, and "liqs4"/"dsliqs4" add the liquid kernel. ``norm_type`` selects
+batch or layer normalization.
 """
 
 from typing import Any, Callable, Dict, Optional
@@ -27,7 +20,6 @@ from dsrnn.training.optim import build_optimizer
 from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
 
 # SSM kernel parameters get their own group: lower LR, zero weight decay.
-# Mirrors the original rule: name contains "kernel" and one of log_dt/B/C/P.
 SSM_PARAM_PATTERN = r"kernel.*(?:log_dt|[BCP])"
 
 
@@ -56,10 +48,9 @@ class S4Block(nn.Module):
         self.linear = nn.Linear(d_model, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, L, H)
         residual = x
         if self.norm_type == "batch":
-            x = self.norm(x.transpose(-2, -1)).transpose(-2, -1)  # BatchNorm over H
+            x = self.norm(x.transpose(-2, -1)).transpose(-2, -1)
         else:
             x = self.norm(x)
         x = x.transpose(-2, -1)   # (B, H, L) for the transposed S4
@@ -112,13 +103,11 @@ class LRAModule(lit.LightningModule):
         if "liq" in model_type and liquid_kernel is None:
             liquid_kernel = "polyb"
 
-        # Input projection
         if vocab_size is not None and vocab_size > 0:
             self.embed: nn.Module = nn.Embedding(vocab_size, d_model)
         else:
             self.embed = nn.Linear(input_size, d_model)
 
-        # S4 blocks; DS variants attach a router to each layer.
         s4_kwargs: Dict[str, Any] = dict(
             liquid_kernel=liquid_kernel, liquid_degree=liquid_degree,
             sparsity_target=sparsity_target, sparsity_dim=sparsity_dim,
@@ -167,7 +156,7 @@ class LRAModule(lit.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if isinstance(self.embed, nn.Embedding):
             if torch.is_floating_point(x):
-                x = x.argmax(dim=-1).long()  # one-hot/float -> token indices
+                x = x.argmax(dim=-1).long()
             x = x.long()
         else:
             x = x.float()
