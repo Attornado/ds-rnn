@@ -10,9 +10,9 @@ def plot_adjacency_heatmap(adj: torch.Tensor,
                            figsize: tuple = (6, 6),
                            max_ticks: int = 10,
                            label_rotation: float = 90,
-row_width: float = 8,
+                           fontsize: float = 8,
                            title: str = "Adjacency Matrix Heatmap") -> plt.Figure:
-    """Heatmap of a weighted (N, N) adjacency matrix. Pure matplotlib."""
+    """Heatmap of a weighted (N, N) adjacency matrix."""
     mat = adj.detach().cpu().numpy()
     fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(mat, cmap=cmap, vmin=0, vmax=1, origin="upper")
@@ -23,8 +23,8 @@ row_width: float = 8,
     ax.set_ylabel("From node")
     ax.set_xticks(ticks)
     ax.set_yticks(ticks)
-    ax.set_xticklabels(ticks, rotation=label_rotation, fontsize=row_width)
-    ax.set_yticklabels(ticks, rotation=0, fontsize=row_width)
+    ax.set_xticklabels(ticks, rotation=label_rotation, fontsize=fontsize)
+    ax.set_yticklabels(ticks, rotation=0, fontsize=fontsize)
     ax.set_aspect("equal")
     ax.set_xticks([i - 0.5 for i in range(1, mat.shape[1])], minor=True)
     ax.set_yticks([i - 0.5 for i in range(1, mat.shape[0])], minor=True)
@@ -39,11 +39,7 @@ row_width: float = 8,
 def plot_channel_mask_heatmap(mask: torch.Tensor,
                               title: str = "Channel mask over time",
                               cmap: str = "viridis") -> plt.Figure:
-    """Heatmap of a (T, H) channel mask (channels on y, time on x).
-
-    This is the channel-level analogue of the adjacency heatmap for the new
-    router, which produces per-channel (not per-edge) masks.
-    """
+    """Heatmap of a (T, H) channel mask (channels on y, time on x)."""
     mat = mask.detach().cpu().numpy().T  # (H, T)
     fig, ax = plt.subplots(figsize=(max(6, mat.shape[1] // 4), max(3, mat.shape[0] // 16)))
     im = ax.imshow(mat, aspect="auto", cmap=cmap, vmin=0.0, vmax=1.0, origin="lower")

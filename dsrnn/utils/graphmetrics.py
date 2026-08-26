@@ -1,12 +1,4 @@
-"""Graph-theoretic metrics for sparsity-mask analysis.
-
-Ported from ``connectomencps.wirings.graphanalytics``. The entropy/spectral
-metrics are pure torch; the connectivity metrics (transitivity, shortest path,
-diameter) use networkx. The original's torch_geometric and louvain
-(`community`) dependencies are dropped: PyG was only used for adjacency->graph
-conversion (replaced by a direct networkx build), and the modularity block was
-commented out upstream.
-"""
+"""Graph-theoretic metrics for sparsity-mask analysis."""
 
 from typing import Dict
 
@@ -94,12 +86,9 @@ def graph_spectral_gap(adj: torch.Tensor, mode: str = "out", eps: float = 1e-12)
     return top2[..., 0] - top2[..., 1]
 
 
-# -- simple connectivity metrics (pure torch, no PyG) --
-
 def _simple_metrics(adj: torch.Tensor) -> Dict[str, torch.Tensor]:
-    """Density, total weight, degree/strength, reciprocity — pure torch."""
+    """Density, total weight, degree/strength, and reciprocity."""
     n = adj.shape[-1]
-    possible = float(n * n)
     is_edge = adj > 0
 
     density = is_edge.float().flatten(start_dim=-2).mean(dim=-1)
@@ -126,7 +115,7 @@ def _simple_metrics(adj: torch.Tensor) -> Dict[str, torch.Tensor]:
 
 
 def _advanced_metrics(adj: torch.Tensor) -> Dict[str, torch.Tensor]:
-    """Transitivity, average shortest path, diameter — via networkx."""
+    """Transitivity, average shortest path, and diameter (via networkx)."""
     import networkx as nx
 
     flat = adj.reshape(-1, adj.shape[-2], adj.shape[-1])
@@ -162,8 +151,7 @@ def compute_graph_metrics(adj: torch.Tensor, advanced: bool = True) -> Dict[str,
     Args:
         adj: Adjacency tensor of shape (..., N, N).
         advanced: Whether to also compute the networkx-based connectivity
-            metrics (transitivity, shortest path, diameter). Set False to skip
-            the networkx dependency.
+            metrics (transitivity, shortest path, diameter).
     """
     out = {
         **_simple_metrics(adj),

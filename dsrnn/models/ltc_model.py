@@ -1,10 +1,4 @@
-"""Dense LTC sequence model wrapping ncps.torch.LTC.
-
-The dense counterpart to ``dsrnn.models.dsltc_model.DSLTC``: a plain ncps LTC
-with a fully-connected wiring, exposing the same ``(output, state)`` sequence
-interface as the other backbones. ``ncps`` is a declared core dependency (the
-DS-LTC cell already inherits from it).
-"""
+"""Dense LTC sequence model wrapping ncps.torch.LTC."""
 
 from typing import Optional, Tuple
 

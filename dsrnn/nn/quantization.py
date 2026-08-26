@@ -1,11 +1,4 @@
-"""Fixed-point quantization helpers used by the DeltaRNN cells.
-
-Ported from the relevant part of ``connectomencps.nn.quantization``:
-``quantize_tensor`` plus its straight-through floor/round estimators. During
-training (``q_type=0``) quantization is the identity; fixed-point quantization
-is applied at inference. (The unrelated simhash/binary-dot utilities in the
-original file are not part of the DeltaRNN path and were not ported.)
-"""
+"""Fixed-point quantization helpers for the DeltaRNN cells."""
 
 import torch
 
@@ -42,9 +35,6 @@ def quantize_tensor(x: torch.Tensor, qi: int, qf: int, q_type: int = 0) -> torch
         qi: Number of integer bits before the binary point.
         qf: Number of fraction bits after the binary point.
         q_type: 0 = none (identity), 1 = round, 2 = floor.
-
-    Returns:
-        The (fixed-point) quantized tensor.
     """
     if q_type == 0:
         return x
@@ -54,5 +44,5 @@ def quantize_tensor(x: torch.Tensor, qi: int, qf: int, q_type: int = 0) -> torch
         value = GradPreserveFloor.apply(x * power)
     else:
         value = GradPreserveRound.apply(x * power)
-    value = torch.clamp(value, -clip_val, clip_val - 1)  # saturation arithmetic
+    value = torch.clamp(value, -clip_val, clip_val - 1)
     return value / power

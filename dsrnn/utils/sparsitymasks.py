@@ -1,15 +1,5 @@
-"""Cross-class / cross-task routing-mask similarity utilities.
+"""Cross-class / cross-task routing-mask similarity metrics."""
 
-Ported from ``connectomencps.utils.visualization.sparsitymasks``: cosine
-similarity, fuzzy IoU, and Jensen-Shannon divergence over per-class mask
-centroids. These operate on mask tensors shaped (L, G, C, T, H) (layers x
-gates x classes x time x channels); the new channel router yields one mask, so
-L=G=1. Pure torch/numpy.
-"""
-
-from typing import Optional
-
-import numpy as np
 import torch
 
 
@@ -24,15 +14,15 @@ def compute_inter_class_similarity(res: torch.Tensor, labels: torch.Tensor,
         idx = (labels.squeeze() == c)
         if idx.sum() == 0:
             continue
-        hh_c = res[:, :, idx, :, :]  # (L, G, Bc, T, H)
+        hh_c = res[:, :, idx, :, :]
         if binarize:
             hh_c = (hh_c > 0).float()
         res_grouped[:, :, c, :, :] = hh_c.mean(dim=2)
 
     res = torch.nn.functional.normalize(res_grouped, dim=-1)
-    res_perm = res.permute(0, 1, 3, 2, 4)              # (L,G,T,C,H)
-    sim = torch.matmul(res_perm, res_perm.transpose(-1, -2))  # (L,G,T,C,C)
-    return sim.mean(dim=(0, 1, 2))                      # (C, C)
+    res_perm = res.permute(0, 1, 3, 2, 4)
+    sim = torch.matmul(res_perm, res_perm.transpose(-1, -2))
+    return sim.mean(dim=(0, 1, 2))
 
 
 def compute_class_heatmaps(res: torch.Tensor, layer: int, labels: torch.Tensor,
@@ -46,9 +36,9 @@ def compute_class_heatmaps(res: torch.Tensor, layer: int, labels: torch.Tensor,
         if idx.sum() == 0:
             class_heats.append(torch.zeros(n_gates, n_neurons, timesteps))
             continue
-        hh_c = res[layer, :, idx, :, :]   # (G, Bc, T, H)
-        hh_c = hh_c.mean(dim=1)           # (G, T, H)
-        class_heats.append(hh_c.permute(0, 2, 1).contiguous())  # (G, H, T)
+        hh_c = res[layer, :, idx, :, :]
+        hh_c = hh_c.mean(dim=1)
+        class_heats.append(hh_c.permute(0, 2, 1).contiguous())
     return torch.stack(class_heats, dim=0)[:, 0:n_gates]
 
 
@@ -133,15 +123,15 @@ def compute_inter_class_jsd(res: torch.Tensor, labels: torch.Tensor,
     res = res_grouped.clamp(min=0)
     res = res / (res.sum(dim=-1, keepdim=True) + eps)
 
-    P = res.unsqueeze(2)  # (L,G,C,1,T,H)
-    Q = res.unsqueeze(3)  # (L,G,1,C,T,H)
+    P = res.unsqueeze(2)
+    Q = res.unsqueeze(3)
     M = 0.5 * (P + Q)
 
     def kl_div(A, B):
         return (A * (torch.log(A + eps) - torch.log(B + eps))).sum(dim=-1)
 
-    jsd = 0.5 * (kl_div(P, M) + kl_div(Q, M))  # (L,G,C,C,T)
-    jsd_mean = jsd.mean(dim=(0, 1, 4))          # (C,C)
+    jsd = 0.5 * (kl_div(P, M) + kl_div(Q, M))
+    jsd_mean = jsd.mean(dim=(0, 1, 4))
     if return_similarity:
         jsd_mean = 1.0 - jsd_mean / torch.log(torch.tensor(2.0, device=res.device))
     return jsd_mean
