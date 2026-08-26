@@ -11,8 +11,8 @@ masking, and (iii) the learned routing mechanism:
 - ``RandomDynamicMasker``: random per-example top-k selection (learned router
   replaced by chance).
 
-Ported from the old ``train_ablation_masking.py`` onto the new repo's dense
-``LSTMCell``/``GRUCell`` (same ``forward(x, hx)`` interface).
+Ported from the old ``train_ablation_masking.py``. LSTM/GRU use the new repo's
+dense cells; LTC uses ncps' ``LTCCell`` with a fully-connected wiring.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -145,17 +145,26 @@ class MaskedRNN(nn.Module):
     """Dense RNN whose input/hidden state are gated by a masking strategy."""
 
     def __init__(self, model_type: str, input_size: int, hidden_size: int,
-                 sparsity: float, masker_type: str, batch_first: bool = True):
+                 sparsity: float, masker_type: str, batch_first: bool = True,
+                 model_kwargs: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.model_type = model_type
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.batch_first = batch_first
+        model_kwargs = model_kwargs or {}
 
         if model_type == "lstm":
             self.cell = LSTMCell(input_size=input_size, hidden_size=hidden_size)
         elif model_type == "gru":
             self.cell = GRUCell(input_size=input_size, hidden_size=hidden_size)
+        elif model_type == "ltc":
+            from ncps.torch import LTCCell
+            from ncps.wirings import FullyConnected
+            wiring = FullyConnected(units=hidden_size, output_dim=hidden_size,
+                                    self_connections=True)
+            wiring.build(input_size)
+            self.cell = LTCCell(wiring=wiring, in_features=input_size, **model_kwargs)
         else:
             raise ValueError(f"Unsupported model_type: {model_type}")
 
@@ -180,8 +189,10 @@ class MaskedRNN(nn.Module):
             h_tilde = h * m_h
             if self.model_type == "lstm":
                 out, (h, c) = self.cell(x_tilde, (h_tilde, c))
-            else:
+            elif self.model_type == "gru":
                 out, h = self.cell(x_tilde, h_tilde)
+            else:  # ltc
+                out, h = self.cell.forward(x_tilde, h_tilde)
             outputs.append(out)
 
         out_seq = torch.stack(outputs, dim=0)
@@ -205,13 +216,15 @@ class AblationLitModule(lit.LightningModule):
                  metric_params: Dict[str, Optional[Dict[str, Any]]],
                  batch_first: bool = True,
                  lr: float = 5e-3,
-                 weight_decay: float = 0.0):
+                 weight_decay: float = 0.0,
+                 model_kwargs: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.save_hyperparameters()
 
         self.rnn = MaskedRNN(model_type=model_type, input_size=input_size,
                              hidden_size=hidden_size, sparsity=sparsity,
-                             masker_type=masker_type, batch_first=batch_first)
+                             masker_type=masker_type, batch_first=batch_first,
+                             model_kwargs=model_kwargs)
         self.projection = nn.Linear(hidden_size, output_size)
 
         loss_type = loss_type.lower()

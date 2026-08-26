@@ -3,10 +3,11 @@
 Port of the old ``SequenceForecastModule`` + ``PruningRNNLitModule`` pair,
 merged into a single module: the pruning/mask machinery (``masks``,
 ``apply_masks``, the Lightning hooks) is always present and is a no-op until
-masks are attached, so RigL/IMP can run on the same class.
+masks are attached, so RigL can run on the same class.
 
 Backbones are built headless; this module owns the final projection, so there
-is exactly one output path regardless of model type.
+is exactly one output path regardless of model type. Supported backbones:
+lstm, gru (dense torch), ltc (dense, via ncps), dslstm, dsgru (dynamic-sparse).
 """
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -19,6 +20,7 @@ from torch import nn
 
 from dsrnn.models.dslstm_model import DSLSTM
 from dsrnn.models.dsgru_model import DSGRU
+from dsrnn.models.ltc_model import LTC
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.optim import build_optimizer
 from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
@@ -62,10 +64,11 @@ def build_backbone(model_type: str,
                    model_kwargs: Optional[Dict[str, Any]] = None) -> nn.Module:
     """Construct a headless backbone returning ``(outputs, state)``.
 
-    Supported: ``lstm``, ``gru``, ``dslstm``, ``dsgru``. For the DS models,
-    ``model_kwargs`` may contain a ``router_config`` entry (a RouterConfig or a
-    dict of its kwargs; ``num_channels``/``input_dim`` default to the hidden
-    and input sizes).
+    Supported: ``lstm``, ``gru`` (dense torch), ``ltc`` (dense, ncps),
+    ``dslstm``, ``dsgru`` (dynamic-sparse). For the DS models, ``model_kwargs``
+    may contain a ``router_config`` entry (a RouterConfig or a dict of its
+    kwargs; ``num_channels``/``input_dim`` default to the hidden and input
+    sizes). For ``ltc``, extra ``model_kwargs`` are forwarded to ncps' LTC.
     """
     model_type = model_type.lower()
     model_kwargs = dict(model_kwargs or {})
@@ -74,6 +77,10 @@ def build_backbone(model_type: str,
         return _TorchRNNAdapter(model_type, input_size=input_size,
                                 hidden_size=hidden_size, batch_first=batch_first,
                                 **model_kwargs)
+
+    if model_type == "ltc":
+        return LTC(input_size=input_size, hidden_size=hidden_size,
+                   batch_first=batch_first, output_size=None, **model_kwargs)
 
     if model_type in ("dslstm", "dsgru"):
         router = model_kwargs.pop("router_config", None)
@@ -178,7 +185,7 @@ class SequenceModule(lit.LightningModule):
             for m in metric_params
         }
 
-        # Pruning masks (attached externally for RigL/IMP; no-op when empty)
+        # Pruning masks (attached externally for RigL; no-op when empty)
         self.masks: Dict[str, Optional[torch.Tensor]] = {}
 
     @property
