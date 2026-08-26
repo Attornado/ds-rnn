@@ -129,9 +129,9 @@ def main() -> None:
                         help="hidden: vary hidden size (fixed T=500); "
                              "seq: vary sequence length (fixed H=128); both.")
     parser.add_argument("--hidden_sizes", type=int, nargs="+",
-                        default=[64, 128, 256, 512])
+                        default=[64, 96, 128, 192, 256])
     parser.add_argument("--seq_lens", type=int, nargs="+",
-                        default=[128, 256, 500, 1000])
+                        default=[50, 100, 150, 200, 250, 300, 350, 400, 450, 500])
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--input_size", type=int, default=32)
     parser.add_argument("--sparsity", type=float, default=0.9)
