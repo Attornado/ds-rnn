@@ -114,7 +114,6 @@ def test_ablation_module_smoke_and_snip_init():
         metric_params={"accuracy": {"task": "multiclass", "num_classes": C,
                                     "average": "macro"}},
     )
-    # SNIP mask init from a real batch
     module.maybe_init_static_mask(_loader())
     assert isinstance(module.rnn.masker, StructuredSNIPMasker)
     assert module.rnn.masker.initialized
@@ -158,7 +157,8 @@ def test_rigl_on_dense_ltc():
                                      RigLCallback(masks, update_frequency=1,
                                                   rewire_fraction=0.1)],
                           fast_dev_run=True)
-        trainer.fit(module, train_dataloaders=_loader())
+        # pass a val loader too, to avoid Lightning's "no val_dataloader" note
+        trainer.fit(module, train_dataloaders=_loader(), val_dataloaders=_loader())
 
     kept_after, _ = count_nonzero_masks(masks)
     assert kept_before == kept_after

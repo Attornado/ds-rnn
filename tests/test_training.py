@@ -65,8 +65,9 @@ def _random_loader():
 
 def test_build_backbone_all_types():
     x = torch.randn(B, T, D)
-    for model_type in ("lstm", "gru"):
-        backbone = build_backbone(model_type, D, H, model_kwargs={"num_layers": 1})
+    for model_type in ("lstm", "gru", "ltc"):
+        backbone = build_backbone(model_type, D, H, model_kwargs={"num_layers": 1}
+                                  if model_type != "ltc" else {})
         out, _ = backbone(x)
         assert out.shape == (B, T, H), (model_type, out.shape)
     for model_type in ("dslstm", "dsgru"):
@@ -88,7 +89,6 @@ def test_param_groups_s4_pattern():
         {"ssm": {"pattern": r"kernel", "lr": 1e-3, "weight_decay": 0.0},
          "all": {"lr": 4e-3, "weight_decay": 0.01}},
     )
-    by_group = {tuple(sorted(p.shape for p in g["params"])): g for g in groups}
     ssm = next(g for g in groups if g["lr"] == 1e-3)
     rest = next(g for g in groups if g["lr"] == 4e-3)
     ssm_names = {id(p) for g in groups if g["lr"] == 1e-3 for p in g["params"]}
@@ -147,14 +147,12 @@ def test_rigl_step_conserves_budget():
     model = torch.nn.Sequential(torch.nn.Linear(16, 16), torch.nn.Linear(16, 4))
     masks = make_initial_masks(model, sparsity=0.9, deterministic=True)
     kept_before, _ = count_nonzero_masks(masks)
-    # Fake backward pass to get gradients
     loss = model(torch.randn(8, 16)).sum()
     loss.backward()
     grads = {n: p.grad.clone() for n, p in model.named_parameters() if n in masks}
     new_masks = rigl_step(model, masks, grads, rewire_fraction=0.1)
     kept_after, _ = count_nonzero_masks(new_masks)
     assert kept_before == kept_after
-    # Something actually changed (with overwhelming probability)
     changed = any((masks[k] != new_masks[k]).any() for k in masks)
     assert changed
 
@@ -165,7 +163,7 @@ def test_rigl_apply_and_optimizer_clear():
     model = torch.nn.Linear(16, 16)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
     model(torch.randn(4, 16)).sum().backward()
-    opt.step()  # populate optimizer state
+    opt.step()
 
     masks = make_initial_masks(model, sparsity=0.5, deterministic=True)
     grads = {n: p.grad.clone() for n, p in model.named_parameters() if n in masks}
@@ -228,7 +226,8 @@ def test_sequence_module_rigl_callback_smoke():
             callbacks=[MaskCallback(masks),
                        RigLCallback(masks, update_frequency=1, rewire_fraction=0.1)],
         )
-        trainer.fit(module, train_dataloaders=loader)
+        # pass a val loader too, to avoid Lightning's "no val_dataloader" note
+        trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)
 
     kept_after, _ = count_nonzero_masks(masks)
     assert kept_before == kept_after
