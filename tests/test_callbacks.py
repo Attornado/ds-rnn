@@ -19,7 +19,8 @@ def _ds_module():
         model_kwargs={"router_config": RouterConfig(
             num_channels=H, input_dim=D, context_dim=4, sparsity=0.9,
             backward="selected_only")},
-        metric_params={"accuracy": {"task": "multiclass", num_classes := C: None}},
+        metric_params={"accuracy": {"task": "multiclass", "num_classes": C,
+                                    "average": "macro"}},
         test_with_corruptions=False,
     )
 
@@ -62,7 +63,6 @@ def test_sparsity_mask_collection():
     x = torch.randn(1, T, D)
     mask = _collect_hidden_mask_over_time(module.backbone, x)
     assert mask.shape == (T, H)
-    # channel mask is in [0, 1]
     assert (mask >= 0).all() and (mask <= 1).all()
 
 
