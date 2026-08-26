@@ -17,6 +17,7 @@ dependencies = [
     "torch>=2.1",
     "numpy>=1.24",
     "pyyaml>=6.0",
+    "einops>=0.7",
 ]
 
 [project.optional-dependencies]
