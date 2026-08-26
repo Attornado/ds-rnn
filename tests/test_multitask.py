@@ -6,7 +6,7 @@ Random tensors, CPU, fast_dev_run, no clutter.
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from dsrnn.nn.router import RouterConfig
 from dsrnn.training.multitask import (FixedTaskWeighting, MultitaskModule,
@@ -24,6 +24,24 @@ def _batch():
     task = np.array(["s1"] * (B // 2) + ["s2"] * (B // 2))
     return {"x": x, "y": y, "x_lengths": x_lengths, "y_lengths": y_lengths,
             "task_id": task_id, "task": task}
+
+
+class _ListDataset(Dataset):
+    """A dataset whose items are whole pre-built batch dicts."""
+
+    def __init__(self, batches):
+        self.batches = batches
+
+    def __len__(self):
+        return len(self.batches)
+
+    def __getitem__(self, i):
+        return self.batches[i]
+
+
+def _loader():
+    # batch_size=None yields each item (a batch dict) unchanged; no collate_fn.
+    return DataLoader(_ListDataset([_batch()]), batch_size=None)
 
 
 def _module(model_type="lstm", implementation="gathered"):
@@ -67,7 +85,7 @@ def test_multitask_trainer_smoke_ds():
     from lightning import Trainer
 
     module = _module("dslstm")
-    loader = DataLoader([_batch()], batch_size=None, collate_fn=lambda b: b[0])
+    loader = _loader()
     with tempfile.TemporaryDirectory() as tmp:
         trainer = Trainer(fast_dev_run=True, logger=False, enable_checkpointing=False,
                           enable_progress_bar=False, enable_model_summary=False,
@@ -82,7 +100,7 @@ def test_multitask_trainer_smoke_dsltc():
     from lightning import Trainer
 
     module = _module("dsltc")  # gathered + selected_only is supported
-    loader = DataLoader([_batch()], batch_size=None, collate_fn=lambda b: b[0])
+    loader = _loader()
     with tempfile.TemporaryDirectory() as tmp:
         trainer = Trainer(fast_dev_run=True, logger=False, enable_checkpointing=False,
                           enable_progress_bar=False, enable_model_summary=False,
@@ -97,7 +115,7 @@ def test_multitask_mask_analysis_callback():
     from dsrnn.training.sparsity import MultitaskMaskAnalysisCallback
 
     module = _module("dslstm")
-    loader = DataLoader([_batch()], batch_size=None, collate_fn=lambda b: b[0])
+    loader = _loader()
 
     class _DM:
         def val_dataloader(self):
