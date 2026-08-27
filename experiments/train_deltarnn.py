@@ -6,20 +6,17 @@ Example (SeqMNIST, DeltaGRU):
     python experiments/train_deltarnn.py --task seqmnist --model_type gru \\
         --hidden_size 128 --thx 0.1 --thh 0.1
 """
-
 import argparse
 import sys
-
 import lightning as lit
 import torch
 import yaml
 from lightning.pytorch.callbacks import EarlyStopping
-
 from dsrnn.training.deltarnn import DeltaRNNClassifier
 from dsrnn.training.tasks import TASKS, load_datamodule
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; CLI flags override it.")

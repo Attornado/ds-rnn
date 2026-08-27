@@ -6,7 +6,6 @@ Example (ETTh1, DS-LSTM, encoder 168 / prediction 24):
     python experiments/train_forecasting.py --dataset etth1 \\
         --model_type dslstm --hidden_size 64 --sparsity 0.9
 """
-
 import argparse
 import sys
 from typing import Any, Dict

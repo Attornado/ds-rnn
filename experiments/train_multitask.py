@@ -12,13 +12,12 @@ Example (synthetic teacher-student tasks):
     python experiments/train_multitask.py --tasks synth-rnn --n_tasks_synth 5 \\
         --model_type dslstm
 """
-
 import argparse
 import sys
 from typing import Any, Dict, List, Optional
 import torch
 import yaml
-from lightning import Trainer, seed_everything
+from lightning import Trainer, seed_everything, Callback
 from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
 from dsrnn.data.multitask import MultiTaskDataModule
@@ -99,7 +98,7 @@ def build_model(tasks: List[str], model_type: str, hidden_size: int,
     )
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; CLI flags override it.")
@@ -214,12 +213,13 @@ def main() -> None:
     else:
         logger = CSVLogger(args.log_dir, name="rnn_multitask")
 
-    callbacks = [EarlyStopping(monitor="val/loss", patience=25, mode="min", verbose=True)]
+    callbacks: list[Callback] = [EarlyStopping(monitor="val/loss", patience=25, mode="min", verbose=True)]
     if args.analyze_masks:
         from dsrnn.training.sparsity import MultitaskMaskAnalysisCallback
         callbacks.append(MultitaskMaskAnalysisCallback(
-            datamodule=dm, every_n_epochs=1, max_batches_per_task=2,
-            log_validation=True))
+            datamodule=dm, every_n_epochs=1,
+            max_batches_per_task=2, log_validation=True
+        ))
 
     devices = [int(d) for d in args.devices.split(",")]
     trainer = Trainer(max_epochs=args.epochs, logger=logger, callbacks=callbacks,

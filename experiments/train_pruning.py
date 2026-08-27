@@ -97,7 +97,7 @@ def run_rigl(args) -> Tuple[SequenceModule, Dict[str, torch.Tensor]]:
     return module, masks
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; CLI flags override it.")

@@ -66,7 +66,7 @@ def _load_datamodule(task: str, batch_size: int, num_workers: int):
     return cls(**kwargs)
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; CLI flags override it.")
