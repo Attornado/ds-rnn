@@ -9,7 +9,7 @@ import argparse
 import csv
 import os
 import time
-from typing import Dict, List
+from typing import Dict, List, Final
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -20,6 +20,10 @@ import torch.nn.functional as F
 from dsrnn.models.dslstm_model import DSLSTM
 #from dsrnn.models.lstm_model import LSTM
 from dsrnn.nn.router import RouterConfig
+
+
+DEFAULT_HIDDEN_SIZE: Final[int] = 128
+DEFAULT_SEQ_LEN: Final[int] = 500
 
 
 class LSTMCell(nn.Module):
@@ -175,8 +179,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sweep", type=str, default="both",
                         choices=["hidden", "seq", "both"],
-                        help="hidden: vary hidden size (fixed T=500); "
-                             "seq: vary sequence length (fixed H=128); both.")
+                        help=f"hidden: vary hidden size (fixed T={DEFAULT_SEQ_LEN}); "
+                             f"seq: vary sequence length (fixed H={DEFAULT_HIDDEN_SIZE}); both.")
     parser.add_argument("--hidden_sizes", type=int, nargs="+",
                         default=[64, 96, 128, 192, 256])
     parser.add_argument("--seq_lens", type=int, nargs="+",
@@ -222,8 +226,8 @@ def main():
     all_rows: List[Dict] = []
     for sweep, values in sweeps:
         for v in values:
-            H = v if sweep == "hidden" else 128
-            T = 500 if sweep == "hidden" else v
+            H = v if sweep == "hidden" else DEFAULT_HIDDEN_SIZE
+            T = DEFAULT_SEQ_LEN if sweep == "hidden" else v
             rows = measure(D=args.input_size, H=H, T=T, B=args.batch_size,
                            sparsity=args.sparsity, router_dim=args.router_dim,
                            device=device, n_warmup=args.n_warmup,
