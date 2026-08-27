@@ -1,35 +1,87 @@
-"""Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs a dense LSTM.
-
-Reproduces the data behind the efficiency figure: FLOPs and runtime as a
-function of hidden size (fixed sequence length) and of sequence length (fixed
-hidden size), at fixed batch size, input size, and sparsity. Times the full
-forward pass (routing, top-k selection, and gathering included).
-
-The dense baseline is the repo's eager LSTM (``dsrnn.models.lstm_model.LSTM``):
-both it and ``DSLSTM(implementation="gathered")`` are per-timestep loops, so
-the gap isolates the routing + gathering overhead.
+"""
+Benchmark: FLOPs and wall-clock runtime of DS-LSTM vs a dense LSTM.
 
 Example (both sweeps, write CSV + figure):
 
-    python experiments/benchmark.py --sweep both --out _benchmarks/dslstm.csv \\
-        --plot _benchmarks/dslstm.png
+    python experiments/benchmark.py --sweep both --out _benchmarks/dslstm.csv --plot _benchmarks/dslstm.png
 """
-
 import argparse
 import csv
 import os
 import time
 from typing import Dict, List
-
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 from dsrnn.models.dslstm_model import DSLSTM
-from dsrnn.models.lstm_model import LSTM
+#from dsrnn.models.lstm_model import LSTM
 from dsrnn.nn.router import RouterConfig
 
 
-def synchronize(device):
+class LSTMCell(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.input_size, self.hidden_size = input_size, hidden_size
+        self.weight_ih = nn.Parameter(torch.empty(4 * hidden_size, input_size))
+        self.weight_hh = nn.Parameter(torch.empty(4 * hidden_size, hidden_size))
+        self.bias_ih = nn.Parameter(torch.zeros(4 * hidden_size))
+        self.bias_hh = nn.Parameter(torch.zeros(4 * hidden_size))
+        nn.init.xavier_uniform_(self.weight_ih)
+        nn.init.orthogonal_(self.weight_hh)
+
+    def forward(self, x, hx=None):
+        batch_size = x.size(0)
+        if hx is None:
+            h = x.new_zeros(batch_size, self.hidden_size)
+            c = x.new_zeros(batch_size, self.hidden_size)
+        else:
+            h, c = hx
+        w_ih = self.weight_ih.view(4, self.hidden_size, self.input_size)
+        w_hh = self.weight_hh.view(4, self.hidden_size, self.hidden_size)
+        gates = []
+        for i in range(4):
+            i2h = F.linear(x, w_ih[i], self.bias_ih[i * self.hidden_size:(i + 1) * self.hidden_size])
+            h2h = F.linear(h, w_hh[i], self.bias_hh[i * self.hidden_size:(i + 1) * self.hidden_size])
+            gates.append(i2h + h2h)
+        i, f, g, o = torch.chunk(torch.stack(gates, dim=-1), 4, dim=-1)
+        i, f, g, o = i.squeeze(-1), f.squeeze(-1), g.squeeze(-1), o.squeeze(-1)
+        i, f, g, o = torch.sigmoid(i), torch.sigmoid(f), torch.tanh(g), torch.sigmoid(o)
+        c_new = f * c + i * g
+        h_new = o * torch.tanh(c_new)
+        return h_new, (h_new, c_new)
+
+
+class LSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, batch_first=True):
+        super().__init__()
+        self.cell = LSTMCell(input_size, hidden_size)
+        self.batch_first = batch_first
+        self.hidden_size = hidden_size
+
+    def forward(self, x, hx=None):
+        if self.batch_first:
+            x = x.transpose(0, 1)
+        seq_len, batch, _ = x.shape
+        if hx is None:
+            h = x.new_zeros(batch, self.hidden_size)
+            c = x.new_zeros(batch, self.hidden_size)
+        else:
+            h, c = hx
+        outputs = []
+        for t in range(seq_len):
+            h, (h, c) = self.cell(x[t], (h, c))
+            outputs.append(h)
+        out = torch.stack(outputs, dim=0)
+        if self.batch_first:
+            out = out.transpose(0, 1)
+        return out, (h, c)
+
+
+def synchronize(device: torch.device):
     if device.type == "cuda":
         torch.cuda.synchronize()
 
@@ -51,6 +103,7 @@ def flops(model, x):
         with torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU,
                             torch.profiler.ProfilerActivity.CUDA],
+                record_shapes=True,
                 with_flops=True) as prof:
             model(x)
         return int(sum(event.flops for event in prof.key_averages()))
@@ -83,14 +136,10 @@ def measure(D: int, H: int, T: int, B: int, sparsity: float, router_dim: int,
     return rows
 
 
-def _plot(results: List[Dict], sweep: str, out_path: str) -> None:
+def _plot(results: List[Dict], sweep: str, out_path: str):
     """Dual-axis figure: FLOPs (bars) + runtime (lines) vs the sweep parameter."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    params = sorted({r["param"] for r in results})
+    param_key = "hidden_size" if sweep == "hidden" else "seq_len"
+    params = sorted({r[param_key] for r in results})
     models = ["dense_lstm", "ds_lstm"]
     x = np.arange(len(params))
     width = 0.35
@@ -99,9 +148,9 @@ def _plot(results: List[Dict], sweep: str, out_path: str) -> None:
     ax_rt = ax_flops.twinx()
 
     for i, model in enumerate(models):
-        fl = [next(r["flops"] for r in results if r["param"] == p and r["model"] == model)
+        fl = [next(r["flops"] for r in results if r[param_key] == p and r["model"] == model)
               for p in params]
-        rt = [next(r["runtime_ms"] for r in results if r["param"] == p and r["model"] == model)
+        rt = [next(r["runtime_ms"] for r in results if r[param_key] == p and r["model"] == model)
               for p in params]
         ax_flops.bar(x + (i - 0.5) * width, fl, width, label=f"{model} FLOPs", alpha=0.6)
         ax_rt.plot(x, rt, marker="o", label=f"{model} runtime")
@@ -115,14 +164,14 @@ def _plot(results: List[Dict], sweep: str, out_path: str) -> None:
     ax_flops.set_title("DS-LSTM vs dense LSTM: FLOPs (bars) and runtime (lines)")
     lines1, labels1 = ax_flops.get_legend_handles_labels()
     lines2, labels2 = ax_rt.get_legend_handles_labels()
-    ax_flops.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8)
+    ax_flops.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8,)
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     fig.savefig(out_path, dpi=200)
     plt.close(fig)
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sweep", type=str, default="both",
                         choices=["hidden", "seq", "both"],
@@ -188,8 +237,14 @@ def main() -> None:
                   f"{ds['runtime_ms']:.3f}ms | FLOPs -{flops_red:.1f}%  "
                   f"runtime -{rt_red:.1f}% ({dense['runtime_ms']/ds['runtime_ms']:.2f}x)")
             for r in rows:
-                r.update({"sweep": sweep, "param": v, "batch_size": args.batch_size,
-                          "input_size": args.input_size, "sparsity": args.sparsity})
+                r.update({
+                    "sweep": sweep,
+                    "hidden_size": H,
+                    "seq_len": T,
+                    "batch_size": args.batch_size,
+                    "input_size": args.input_size,
+                    "sparsity": args.sparsity,
+                })
             all_rows.extend(rows)
 
     if args.out:
