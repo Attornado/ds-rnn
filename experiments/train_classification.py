@@ -1,5 +1,4 @@
-"""
-Train a sequence model on the classification/regression benchmarks.
+"""Train a sequence model on the classification/regression benchmarks.
 
 Example (sequential MNIST, DS-LSTM):
 
@@ -27,7 +26,7 @@ def main():
 
     parser.add_argument("--task", type=str, default="seqmnist", choices=list(TASKS))
     parser.add_argument("--model_type", type=str, default="lstm",
-                        choices=["lstm", "gru", "dslstm", "dsgru"])
+                        choices=["lstm", "gru", "ltc", "dslstm", "dsgru", "dsltc"])
     parser.add_argument("--hidden_size", type=int, default=128)
     parser.add_argument("--implementation", type=str, default="gathered",
                         choices=["gathered", "dense"])
@@ -72,14 +71,17 @@ def main():
     task_cfg = TASKS[args.task]
 
     model_kwargs: Dict[str, Any] = {}
-    if args.model_type in ("dslstm", "dsgru"):
+    if args.model_type in ("dslstm", "dsgru", "dsltc"):
         model_kwargs["router_config"] = {
             "sparsity": args.sparsity,
             "context_dim": args.context_dim,
             "backward": args.router_backward,
         }
-    else:
-        model_kwargs.update({"num_layers": 1, "dropout": 0.0})
+
+    # DSLTCCell only forbids gathered+STE; dense is required only with ste.
+    implementation = args.implementation
+    if args.model_type == "dsltc" and args.router_backward == "ste":
+        implementation = "dense"
 
     model = SequenceModule(
         model_type=args.model_type,
@@ -89,7 +91,7 @@ def main():
         use_final_proj=True,
         return_sequences=task_cfg["return_sequences"],
         batch_first=True,
-        implementation=args.implementation,
+        implementation=implementation,
         model_kwargs=model_kwargs,
         loss_type=task_cfg["loss_type"],
         optimizer_type=args.optimizer,
