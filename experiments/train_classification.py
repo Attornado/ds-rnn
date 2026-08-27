@@ -1,9 +1,9 @@
-"""Train a sequence model on the classification/regression benchmarks.
+"""
+Train a sequence model on the classification/regression benchmarks.
 
 Example (sequential MNIST, DS-LSTM):
 
-    python experiments/train_classification.py \\
-        --task seqmnist --model_type dslstm --hidden_size 128 \\
+    python experiments/train_classification.py --task seqmnist --model_type dslstm --hidden_size 128 \
         --sparsity 0.9 --lr 1e-2 --epochs 500
 """
 import argparse
