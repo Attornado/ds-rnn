@@ -7,6 +7,8 @@ Example (sequential MNIST, GRU, RigL at 90% sparsity):
         --sparsity 0.9
 """
 import argparse
+import os
+import re
 import sys
 from typing import Dict, Tuple
 import torch
@@ -61,16 +63,19 @@ def run_rigl(args) -> Tuple[SequenceModule, Dict[str, torch.Tensor]]:
     kept, total = count_nonzero_masks(masks)
     print(f"Initial masks: kept {kept}/{total} ({100. * kept / total:.2f}%)")
 
+    run_name = (f"RigL-{args.model_type}({args.hidden_size})-s={args.sparsity},"
+                f"p={args.rewire_fraction},f={args.update_frequency}"
+                f"-seed={args.seed}-task={args.task}")
+    run_tag = re.sub(r"[^A-Za-z0-9]+", "_", run_name).strip("_")
+
     if args.use_wandb:
         from lightning.pytorch.loggers.wandb import WandbLogger
         logger = WandbLogger(
             project=args.wandb_project,
-            name=f"RigL-{args.model_type}({args.hidden_size})-s={args.sparsity},"
-                 f"p={args.rewire_fraction},f={args.update_frequency}"
-                 f"-seed={args.seed}-task={args.task}",
+            name=run_name,
             config=vars(args))
     else:
-        logger = CSVLogger(args.log_dir, name=f"rigl_{args.task}")
+        logger = CSVLogger(args.log_dir, name=run_tag)
 
     rigl_cfg = {
         "rewire_fraction": args.rewire_fraction,
@@ -80,7 +85,10 @@ def run_rigl(args) -> Tuple[SequenceModule, Dict[str, torch.Tensor]]:
         "grow_init": args.grow_init,
         "scale_init": args.scale_init,
     }
-    checkpoint_cb = ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1)
+    checkpoint_cb = ModelCheckpoint(
+        dirpath=os.path.join(args.log_dir, run_tag),
+        filename=f"{run_tag}_best",
+        monitor="val/loss", mode="min", save_top_k=1)
     callbacks = [MaskCallback(masks), RigLCallback(masks, **rigl_cfg),
                  EarlyStopping(monitor="val/loss", min_delta=0.0,
                                patience=args.early_stopping_patience,

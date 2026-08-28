@@ -13,6 +13,8 @@ Example (synthetic teacher-student tasks):
         --model_type dslstm
 """
 import argparse
+import os
+import re
 import sys
 from typing import Any, Dict, List, Optional
 import torch
@@ -201,19 +203,24 @@ def main():
         kwargs_per_dataset=kwargs_per_dataset,
     )
 
+    task_str = ",".join(tasks)
+    weights_str = args.weighting if not args.task_weights else ",".join(args.task_weights)
+    run_name = args.wandb_run_name or (
+        f"Multitask-{args.model_type}({args.hidden_size})-seed={args.seed}"
+        f"-tasks=({task_str})-weights=({weights_str})")
+    run_tag = re.sub(r"[^A-Za-z0-9]+", "_", run_name).strip("_")
+
     if args.use_wandb:
         from lightning.pytorch.loggers.wandb import WandbLogger
-        task_str = ",".join(tasks)
-        weights_str = args.weighting if not args.task_weights else ",".join(args.task_weights)
-        run_name = args.wandb_run_name or (
-            f"Multitask-{args.model_type}({args.hidden_size})-seed={args.seed}"
-            f"-tasks=({task_str})-weights=({weights_str})")
         logger = WandbLogger(project=args.wandb_project, name=run_name,
                              entity=args.wandb_entity, config=vars(args))
     else:
-        logger = CSVLogger(args.log_dir, name="rnn_multitask")
+        logger = CSVLogger(args.log_dir, name=run_tag)
 
-    checkpoint_cb = ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1)
+    checkpoint_cb = ModelCheckpoint(
+        dirpath=os.path.join(args.log_dir, run_tag),
+        filename=f"{run_tag}_best",
+        monitor="val/loss", mode="min", save_top_k=1)
     callbacks: list[Callback] = [EarlyStopping(monitor="val/loss", patience=25, mode="min", verbose=True),
                                  checkpoint_cb]
     if args.analyze_masks:

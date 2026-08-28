@@ -8,6 +8,8 @@ Example (sCIFAR-10, DS-S4):
 """
 import argparse
 import importlib
+import os
+import re
 import sys
 from typing import Any, Dict
 import lightning as lit
@@ -107,8 +109,8 @@ def main():
     parser.add_argument("--devices", type=str, default="0")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--results_file", type=str, default=None)
-    parser.add_argument("--ckpt_dir", type=str, default=None,
-                        help="Directory for the best-validation checkpoint (Lightning default if unset).")
+    parser.add_argument("--ckpt_dir", type=str, default="_checkpoints",
+                        help="Base directory for the best-validation checkpoint.")
     parser.add_argument("--test_with_corruptions", action="store_true", default=False)
 
     # Logging (default: no logger, results go to the CSV file)
@@ -189,17 +191,20 @@ def main():
     )
 
     # Always keep the best-validation checkpoint so the test step evaluates it.
-    checkpoint_cb = ModelCheckpoint(dirpath=args.ckpt_dir, monitor="val/acc",
-                                    mode="max", save_top_k=1)
+    sparsity_str = f"-sp{args.sparsity}" if args.model_type in ("dss4", "dsliqs4") else ""
+    run_name = (f"{args.model_type}(d={args.d_model},h={args.d_state})-"
+                f"{args.task}{sparsity_str}-seed={args.seed}")
+    run_tag = re.sub(r"[^A-Za-z0-9]+", "_", run_name).strip("_")
+    checkpoint_cb = ModelCheckpoint(
+        dirpath=os.path.join(args.ckpt_dir, run_tag),
+        filename=f"{run_tag}_best",
+        monitor="val/acc", mode="max", save_top_k=1)
     callbacks = [checkpoint_cb]
 
     # Logger: none by default (results go to the CSV file); wandb opt-in.
     logger = None
     if args.use_wandb:
         from lightning.pytorch.loggers.wandb import WandbLogger
-        sparsity_str = f"-sp{args.sparsity}" if args.model_type in ("dss4", "dsliqs4") else ""
-        run_name = (f"{args.model_type}(d={args.d_model},h={args.d_state})-"
-                    f"{args.task}{sparsity_str}-seed={args.seed}")
         logger = WandbLogger(project=args.wandb_project, name=run_name,
                              entity=args.wandb_entity, config=vars(args))
 

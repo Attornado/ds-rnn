@@ -7,6 +7,8 @@ Example (ETTh1, DS-LSTM, encoder 168 / prediction 24):
         --model_type dslstm --hidden_size 64 --sparsity 0.9
 """
 import argparse
+import os
+import re
 import sys
 from typing import Any, Dict
 import lightning as lit
@@ -126,18 +128,24 @@ def main():
             pf.metrics.SMAPE(), pf.metrics.MAE(), pf.metrics.RMSE()]),
     )
 
+    sp = f"-sp{args.sparsity}" if args.model_type in ("dslstm", "dsgru") else ""
+    run_name = f"{args.model_type}({args.hidden_size}){sp}-{args.dataset}-seed={args.seed}"
+    run_tag = re.sub(r"[^A-Za-z0-9]+", "_", run_name).strip("_")
+
     if args.use_wandb:
         from lightning.pytorch.loggers.wandb import WandbLogger
-        sp = f"-sp{args.sparsity}" if args.model_type in ("dslstm", "dsgru") else ""
         logger = WandbLogger(
             project=args.wandb_project,
-            name=f"{args.model_type}({args.hidden_size}){sp}-{args.dataset}-seed={args.seed}",
+            name=run_name,
             config=vars(args))
     else:
-        logger = CSVLogger(args.log_dir, name=args.dataset)
+        logger = CSVLogger(args.log_dir, name=run_tag)
 
     # pytorch_forecasting logs the validation loss as "val_loss" (underscore).
-    checkpoint_cb = ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1)
+    checkpoint_cb = ModelCheckpoint(
+        dirpath=os.path.join(args.log_dir, run_tag),
+        filename=f"{run_tag}_best",
+        monitor="val_loss", mode="min", save_top_k=1)
     callbacks = [EarlyStopping(monitor="val_loss", min_delta=0.0,
                                patience=args.early_stopping_patience,
                                verbose=True, mode="min"),

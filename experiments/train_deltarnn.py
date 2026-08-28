@@ -7,6 +7,8 @@ Example (SeqMNIST, DeltaGRU):
         --hidden_size 128 --thx 0.1 --thh 0.1
 """
 import argparse
+import os
+import re
 import sys
 import lightning as lit
 import torch
@@ -97,17 +99,23 @@ def main():
         model_type=args.model_type,
     )
 
+    run_name = f"delta{args.model_type}({args.hidden_size})-{args.task}-seed={args.seed}"
+    run_tag = re.sub(r"[^A-Za-z0-9]+", "_", run_name).strip("_")
+
     if args.use_wandb:
         from lightning.pytorch.loggers.wandb import WandbLogger
         logger = WandbLogger(
             project=args.wandb_project,
-            name=f"delta{args.model_type}({args.hidden_size})-{args.task}-seed={args.seed}",
+            name=run_name,
             config=vars(args))
         logger_kw = {"logger": logger}
     else:
         logger_kw = {"logger": False}
 
-    checkpoint_cb = ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1)
+    checkpoint_cb = ModelCheckpoint(
+        dirpath=os.path.join(args.log_dir, run_tag),
+        filename=f"{run_tag}_best",
+        monitor="val_loss", mode="min", save_top_k=1)
     devices = [int(d) for d in args.devices.split(",")]
     trainer = lit.Trainer(
         max_epochs=args.epochs,

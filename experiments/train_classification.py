@@ -7,6 +7,8 @@ Example (sequential MNIST, DS-LSTM):
         --sparsity 0.9 --lr 1e-2 --epochs 500
 """
 import argparse
+import os
+import re
 import sys
 from typing import Any, Dict
 import torch
@@ -109,15 +111,21 @@ def main():
     dm = load_datamodule(args.task, batch_size=args.batch_size,
                          num_workers=args.num_workers)
 
+    run_name = f"{args.model_type}({args.hidden_size})-{args.task}"
+    run_tag = re.sub(r"[^A-Za-z0-9]+", "_", run_name).strip("_")
+
     if args.use_wandb:
         from lightning.pytorch.loggers.wandb import WandbLogger
         logger = WandbLogger(project=args.wandb_project,
-                             name=f"{args.model_type}({args.hidden_size})-{args.task}",
+                             name=run_name,
                              config=vars(args))
     else:
-        logger = CSVLogger(args.log_dir, name=args.task)
+        logger = CSVLogger(args.log_dir, name=run_tag)
 
-    checkpoint_cb = ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1)
+    checkpoint_cb = ModelCheckpoint(
+        dirpath=os.path.join(args.log_dir, run_tag),
+        filename=f"{run_tag}_best",
+        monitor="val/loss", mode="min", save_top_k=1)
     callbacks = [EarlyStopping(monitor="val/loss", min_delta=0.0,
                                patience=args.early_stopping_patience,
                                verbose=True, mode="min"),
