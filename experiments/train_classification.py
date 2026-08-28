@@ -12,7 +12,7 @@ from typing import Any, Dict
 import torch
 import yaml
 from lightning import Trainer, seed_everything
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from dsrnn.training.scheduler import LRSchedulerConfig
 from dsrnn.training.sequence import SequenceModule
@@ -117,9 +117,11 @@ def main():
     else:
         logger = CSVLogger(args.log_dir, name=args.task)
 
+    checkpoint_cb = ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1)
     callbacks = [EarlyStopping(monitor="val/loss", min_delta=0.0,
                                patience=args.early_stopping_patience,
-                               verbose=True, mode="min")]
+                               verbose=True, mode="min"),
+                 checkpoint_cb]
 
     devices = [int(d) for d in args.devices.split(",")]
     trainer = Trainer(
@@ -131,7 +133,7 @@ def main():
     )
 
     trainer.fit(model, datamodule=dm)
-    trainer.test(model, datamodule=dm)
+    trainer.test(model, datamodule=dm, ckpt_path="best")
 
 
 if __name__ == "__main__":

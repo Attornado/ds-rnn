@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 import torch
 import yaml
 from lightning import Trainer, seed_everything, Callback
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from dsrnn.data.multitask import MultiTaskDataModule
 from dsrnn.nn.router import RouterConfig
@@ -213,7 +213,9 @@ def main():
     else:
         logger = CSVLogger(args.log_dir, name="rnn_multitask")
 
-    callbacks: list[Callback] = [EarlyStopping(monitor="val/loss", patience=25, mode="min", verbose=True)]
+    checkpoint_cb = ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1)
+    callbacks: list[Callback] = [EarlyStopping(monitor="val/loss", patience=25, mode="min", verbose=True),
+                                 checkpoint_cb]
     if args.analyze_masks:
         from dsrnn.training.sparsity import MultitaskMaskAnalysisCallback
         callbacks.append(MultitaskMaskAnalysisCallback(
@@ -228,7 +230,7 @@ def main():
     dm.setup("fit")
     trainer.fit(model, dm)
     dm.setup("test")
-    trainer.test(model, dm)
+    trainer.test(model, dm, ckpt_path="best")
 
 
 if __name__ == "__main__":

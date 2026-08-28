@@ -12,7 +12,7 @@ from typing import Any, Dict
 import lightning as lit
 import torch
 import yaml
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from dsrnn.data.forecasting import ForecastingDataModule
 from dsrnn.nn.router import RouterConfig
@@ -136,15 +136,18 @@ def main():
     else:
         logger = CSVLogger(args.log_dir, name=args.dataset)
 
-    callbacks = [EarlyStopping(monitor="val/loss", min_delta=0.0,
+    # pytorch_forecasting logs the validation loss as "val_loss" (underscore).
+    checkpoint_cb = ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1)
+    callbacks = [EarlyStopping(monitor="val_loss", min_delta=0.0,
                                patience=args.early_stopping_patience,
-                               verbose=True, mode="min")]
+                               verbose=True, mode="min"),
+                 checkpoint_cb]
     devices = [int(d) for d in args.devices.split(",")]
     trainer = lit.Trainer(max_epochs=args.epochs, accelerator="auto",
                           devices=devices, logger=logger, callbacks=callbacks)
 
     trainer.fit(model, datamodule=dm)
-    trainer.test(model, datamodule=dm)
+    trainer.test(model, datamodule=dm, ckpt_path="best")
 
 
 if __name__ == "__main__":

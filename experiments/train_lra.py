@@ -108,7 +108,7 @@ def main():
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--results_file", type=str, default=None)
     parser.add_argument("--ckpt_dir", type=str, default=None,
-                        help="If set, enable ModelCheckpoint into this directory.")
+                        help="Directory for the best-validation checkpoint (Lightning default if unset).")
     parser.add_argument("--test_with_corruptions", action="store_true", default=False)
 
     # Logging (default: no logger, results go to the CSV file)
@@ -188,10 +188,10 @@ def main():
         results_file=args.results_file,
     )
 
-    callbacks = []
-    if args.ckpt_dir is not None:
-        callbacks.append(ModelCheckpoint(dirpath=args.ckpt_dir,
-                                         monitor="val/acc", mode="max"))
+    # Always keep the best-validation checkpoint so the test step evaluates it.
+    checkpoint_cb = ModelCheckpoint(dirpath=args.ckpt_dir, monitor="val/acc",
+                                    mode="max", save_top_k=1)
+    callbacks = [checkpoint_cb]
 
     # Logger: none by default (results go to the CSV file); wandb opt-in.
     logger = None
@@ -206,8 +206,8 @@ def main():
     devices = [int(d) for d in args.devices.split(",")]
     trainer_kwargs: Dict[str, Any] = dict(
         accelerator="auto", devices=devices, logger=logger,
-        callbacks=callbacks or None, max_epochs=epochs,
-        enable_checkpointing=args.ckpt_dir is not None,
+        callbacks=callbacks, max_epochs=epochs,
+        enable_checkpointing=True,
     )
     if max_steps is not None:
         trainer_kwargs["max_steps"] = max_steps
@@ -216,7 +216,7 @@ def main():
     trainer = lit.Trainer(**trainer_kwargs)
 
     trainer.fit(model, datamodule=dm)
-    trainer.test(model, datamodule=dm)
+    trainer.test(model, datamodule=dm, ckpt_path="best")
 
 
 if __name__ == "__main__":

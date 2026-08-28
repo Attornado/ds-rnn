@@ -11,7 +11,7 @@ import sys
 import lightning as lit
 import torch
 import yaml
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from dsrnn.training.deltarnn import DeltaRNNClassifier
 from dsrnn.training.tasks import TASKS, load_datamodule
 
@@ -107,6 +107,7 @@ def main():
     else:
         logger_kw = {"logger": False}
 
+    checkpoint_cb = ModelCheckpoint(monitor="val_loss", mode="min", save_top_k=1)
     devices = [int(d) for d in args.devices.split(",")]
     trainer = lit.Trainer(
         max_epochs=args.epochs,
@@ -114,12 +115,13 @@ def main():
         devices=devices,
         log_every_n_steps=10,
         callbacks=[EarlyStopping(monitor="val_loss", patience=args.early_stopping_patience,
-                                 verbose=True)],
-        enable_checkpointing=False,
+                                 verbose=True),
+                   checkpoint_cb],
+        enable_checkpointing=True,
         **logger_kw,
     )
     trainer.fit(model, datamodule=dm)
-    trainer.test(model, datamodule=dm)
+    trainer.test(model, datamodule=dm, ckpt_path="best")
 
 
 if __name__ == "__main__":

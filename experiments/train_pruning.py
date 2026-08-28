@@ -11,7 +11,7 @@ import sys
 from typing import Dict, Tuple
 import torch
 from lightning import Trainer, seed_everything
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from dsrnn.training.pruning import MaskCallback, RigLCallback, apply_masks_to_model, count_nonzero_masks, \
     make_initial_masks
@@ -80,12 +80,14 @@ def run_rigl(args) -> Tuple[SequenceModule, Dict[str, torch.Tensor]]:
         "grow_init": args.grow_init,
         "scale_init": args.scale_init,
     }
+    checkpoint_cb = ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1)
     callbacks = [MaskCallback(masks), RigLCallback(masks, **rigl_cfg),
                  EarlyStopping(monitor="val/loss", min_delta=0.0,
                                patience=args.early_stopping_patience,
-                               verbose=True, mode="min")]
+                               verbose=True, mode="min"),
+                 checkpoint_cb]
     trainer = Trainer(max_epochs=args.epochs, callbacks=callbacks, logger=logger,
-                      enable_checkpointing=False, accelerator="auto", devices=devices,
+                      accelerator="auto", devices=devices,
                       accumulate_grad_batches=args.accumulate_grad_batches)
     trainer.fit(module, datamodule=dm)
 
@@ -93,7 +95,7 @@ def run_rigl(args) -> Tuple[SequenceModule, Dict[str, torch.Tensor]]:
     print(f"After RigL training: kept {kept}/{total} ({100. * kept / total:.2f}%)")
 
     dm.setup("test")
-    trainer.test(module, datamodule=dm)
+    trainer.test(module, datamodule=dm, ckpt_path="best")
     return module, masks
 
 
