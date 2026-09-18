@@ -44,7 +44,9 @@ def budget_from_sparsity(num_channels: int,
 
 def topk_mask(scores: torch.Tensor,
               k: int,
-              backward: BackwardRule = "ste") -> Tuple[torch.Tensor, torch.Tensor]:
+              backward: BackwardRule = "ste",
+              *,
+              binary: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Build a weighted top-k mask from continuous scores.
 
@@ -56,6 +58,7 @@ def topk_mask(scores: torch.Tensor,
         scores: Continuous scores of shape (B, N).
         k: Number of selected channels per example.
         backward: Backward rule for the discrete selection.
+        binary: Whether selected forward values are one instead of their scores.
 
     Returns:
         A (mask, idx) pair with shapes (B, N) and (B, k).
@@ -68,6 +71,12 @@ def topk_mask(scores: torch.Tensor,
         raise ValueError(f"Unknown backward rule '{backward}'.")
 
     idx = scores.topk(k, dim=-1).indices
+    if binary:
+        hard = torch.zeros_like(scores).scatter(-1, idx, 1.0)
+        surrogate = scores if backward == "ste" else scores * hard
+        # Parenthesize the exact-zero term to preserve binary forward values.
+        return hard + (surrogate - surrogate.detach()), idx
+
     hard = torch.zeros_like(scores)
     hard.scatter_(-1, idx, scores.gather(-1, idx))
 

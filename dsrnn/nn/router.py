@@ -107,6 +107,7 @@ class RouterConfig:
         mu_init: Initial sigmoid threshold.
         learnable_tau_mu: Whether tau and mu are learnable.
         bias: Whether linear layers use biases.
+        binary: Whether to use binary top-k masks with surrogate gradients.
     """
     num_channels: int
     input_dim: int
@@ -122,6 +123,7 @@ class RouterConfig:
     mu_init: float = 0.0
     learnable_tau_mu: bool = True
     bias: bool = True
+    binary: bool = False
 
     def __post_init__(self) -> None:
         if self.num_channels < 1:
@@ -228,8 +230,9 @@ class Router(nn.Module):
         logits = self.backbone(context)
         scores = self.scaled_sigmoid(logits)
 
-        if self.routing_enabled:
-            mask, idx = topk_mask(scores, self.k, backward or self.config.backward)
+        if self.routing_enabled or self.config.binary:
+            mask, idx = topk_mask(scores, self.k, backward or self.config.backward,
+                                  binary=self.config.binary)
         else:
             mask = torch.ones_like(scores)
             idx = torch.arange(self.config.num_channels, device=scores.device)
