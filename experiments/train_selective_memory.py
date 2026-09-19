@@ -15,13 +15,11 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-
 import torch
 import yaml
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
-
 from dsrnn.data.selective_memory import SelectiveMemoryDataModule
 from dsrnn.training.scheduler import LRSchedulerConfig
 from dsrnn.training.selective_memory import (
@@ -61,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--devices", type=str, default="1")
-    parser.add_argument("--log_dir", type=str, default="_selective_memory_logs")
+    parser.add_argument("--log_dir", type=str, default="_results/selective_memory_logs")
     parser.add_argument("--run_id", type=str, default=None,
                         help="Optional unique run identifier; must not already exist.")
     return parser

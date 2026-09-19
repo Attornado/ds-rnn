@@ -1,0 +1,26 @@
+# Primary selective-memory benchmark (Experiment A in docs/experiment_plan.md).
+# Launch this config for every preregistered seed. All four variants share the
+# same data, initialization seed, optimizer, schedule, and hidden size.
+models: [dense, read_only, write_only, dual]
+hidden_size: 128
+n_registers: 8
+value_size: 4
+read_sparsity: 0.5
+write_sparsity: 0.5
+router_context_size: 16
+router_backward: ste
+implementation: reference
+n_train: 8192
+n_val: 2048
+n_test: 4096
+batch_size: 128
+epochs: 100
+lr: 0.001
+weight_decay: 0.0
+early_stopping_patience: 15
+seed: 42
+split_seed: 2026
+num_workers: 0
+accelerator: auto
+devices: "1"
+log_dir: _results/selective_memory/primary_reference
