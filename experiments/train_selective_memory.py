@@ -1,4 +1,4 @@
-"""Train the four selective-memory baselines with matched methodology.
+"""Train the selective-memory baselines with matched methodology.
 
 The defaults and ``experiments/configs/selective_memory_smoke.yaml`` are a
 small CPU-friendly smoke experiment. No large sweep is defined here.
@@ -53,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--lr_scheduler_patience", type=int, default=1)
     parser.add_argument("--early_stopping_patience", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--split_seed", type=int, default=123)
@@ -186,8 +187,10 @@ def main() -> None:
             optimizer_kwargs={"all": {"lr": args.lr,
                                        "weight_decay": args.weight_decay}},
             scheduler_config=LRSchedulerConfig(
-                scheduler_type="reduce_on_plateau",
-                scheduler_kwargs={"mode": "min", "factor": 0.5, "patience": 1},
+                scheduler_type="reduce_on_plateau", scheduler_kwargs={
+                    "mode": "min", "factor": 0.5,
+                    "patience": args.lr_scheduler_patience,
+                },
                 interval="epoch", frequency=1, monitor="val/query_mse"),
             analysis_path=str(analysis_path), implementation=args.implementation)
         checkpoint = ModelCheckpoint(
@@ -210,12 +213,11 @@ def main() -> None:
         comparison.append({
             "variant": variant,
             "implementation": args.implementation,
+            "readout_source": "full_post_write_hidden_state",
             "total_parameters": sum(parameter.numel() for parameter in module.parameters()),
             "router_parameters": router_parameters,
-            "read_budget": (args.hidden_size if module.model.read_router is None
-                            else module.model.read_router.k),
-            "write_budget": (args.hidden_size if module.model.write_router is None
-                             else module.model.write_router.k),
+            "read_budget": module.model.read_budget,
+            "write_budget": module.model.write_budget,
             "analysis_path": str(analysis_path),
             "best_checkpoint": checkpoint.best_model_path,
             **{key: float(value) for key, value in results.items()},

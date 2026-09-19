@@ -18,8 +18,9 @@ batch_size: 128
 epochs: 100
 lr: 0.001
 weight_decay: 0.0
+lr_scheduler_patience: 5
 early_stopping_patience: 15
-seed: 42
+seed: 43
 split_seed: 2026
 num_workers: 0
 accelerator: auto

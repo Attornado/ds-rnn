@@ -9,7 +9,7 @@ import torch.distributed as dist
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from torch import nn
 
-from dsrnn.data.selective_memory import OPERATION_NAMES
+from dsrnn.data.selective_memory import OPERATION_NAMES, QUERY, UPDATE
 from dsrnn.nn.cells.dual_read_write import DualReadWriteRNNCell
 from dsrnn.nn.cells.dual_read_write_sparse import SparseDualReadWriteRNNCell
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
@@ -17,7 +17,7 @@ from dsrnn.training.optim import build_optimizer
 from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
 
 
-MODEL_VARIANTS = ("dense", "read_only", "write_only", "dual")
+MODEL_VARIANTS = ("dense", "read_only", "write_only", "shared", "dual")
 IMPLEMENTATIONS = ("reference", "sparse")
 
 
@@ -50,10 +50,26 @@ class SelectiveMemoryRNN(nn.Module):
         base = dict(num_channels=hidden_size, input_dim=input_size,
                     context_dim=router_context_size, backward=router_backward,
                     binary=True, budget_rounding="ceil")
+        if variant == "shared" and read_sparsity != write_sparsity:
+            raise ValueError("The shared-mask variant requires equal read/write sparsity.")
         self.read_router = (Router(RouterConfig(sparsity=read_sparsity, **base))
                             if variant in ("read_only", "dual") else None)
         self.write_router = (Router(RouterConfig(sparsity=write_sparsity, **base))
                              if variant in ("write_only", "dual") else None)
+        self.shared_router = (Router(RouterConfig(sparsity=read_sparsity, **base))
+                              if variant == "shared" else None)
+
+    @property
+    def read_budget(self) -> int:
+        router = (self.read_router if self.read_router is not None
+                  else self.shared_router)
+        return self.hidden_size if router is None else router.k
+
+    @property
+    def write_budget(self) -> int:
+        router = (self.write_router if self.write_router is not None
+                  else self.shared_router)
+        return self.hidden_size if router is None else router.k
 
     @staticmethod
     def _fixed_routing(x: torch.Tensor, hidden_size: int) -> RouterOutput:
@@ -72,19 +88,26 @@ class SelectiveMemoryRNN(nn.Module):
             "read_scores", "write_scores", "read_logits", "write_logits")}
         for timestep in range(x.size(1)):
             xt = x[:, timestep]
-            read = (self.read_router(xt) if self.read_router is not None
-                    else self._fixed_routing(xt, self.hidden_size))
-            write = (self.write_router(xt) if self.write_router is not None
-                     else self._fixed_routing(xt, self.hidden_size))
+            shared = self.shared_router(xt) if self.shared_router is not None else None
+            read = (shared if shared is not None else
+                    self.read_router(xt) if self.read_router is not None else
+                    self._fixed_routing(xt, self.hidden_size))
+            write = (shared if shared is not None else
+                     self.write_router(xt) if self.write_router is not None else
+                     self._fixed_routing(xt, self.hidden_size))
             cell_kwargs = {"read_mask": read.mask, "write_mask": write.mask}
             if self.implementation == "sparse":
                 cell_kwargs.update(
                     read_backward=(self.router_backward
-                                   if self.read_router is not None else None),
+                                   if self.read_router is not None or shared is not None
+                                   else None),
                     write_backward=(self.router_backward
-                                    if self.write_router is not None else None),
+                                    if self.write_router is not None or shared is not None
+                                    else None),
                 )
             h, _ = self.cell(xt, h, **cell_kwargs)
+            # Keep the established baseline readout explicit: it sees the full
+            # post-write state, including coordinates preserved by WRITE=0.
             outputs.append(self.output(h))
             for prefix, routing in (("read", read), ("write", write)):
                 traces[prefix + "_mask"].append(routing.mask)
@@ -123,13 +146,101 @@ def routing_statistics(trace: Dict[str, torch.Tensor],
     }
     for state, active in states.items():
         stats[f"state_{state}"] = active.float().mean()
-    for op_index, op_name in enumerate(OPERATION_NAMES):
-        selected = operations[..., op_index].unsqueeze(-1).expand_as(read)
+    timestep_groups = {name: operations[..., index]
+                       for index, name in enumerate(OPERATION_NAMES)}
+    timestep_groups["query_only"] = (operations[..., QUERY]
+                                     & ~operations[..., UPDATE])
+    timestep_groups["query_update"] = (operations[..., QUERY]
+                                       & operations[..., UPDATE])
+    for op_name, timesteps in timestep_groups.items():
+        selected = timesteps.unsqueeze(-1).expand_as(read)
         denominator = selected.sum().clamp_min(1)
         stats[f"{op_name}/read_activity"] = (read & selected).sum() / denominator
         stats[f"{op_name}/write_activity"] = (write & selected).sum() / denominator
         for state, active in states.items():
             stats[f"{op_name}/state_{state}"] = (active & selected).sum() / denominator
+    return stats
+
+
+def query_loss_statistics(predictions: torch.Tensor, targets: torch.Tensor,
+                          operations: torch.Tensor) -> Dict[str, torch.Tensor]:
+    """Split query error between pure queries and joint query/update steps."""
+    query = operations[..., QUERY]
+    update = operations[..., UPDATE]
+    return {
+        "query_only_mse": masked_query_mse(predictions, targets, query & ~update),
+        "query_update_mse": masked_query_mse(predictions, targets, query & update),
+    }
+
+
+def memory_alignment_statistics(trace: Dict[str, torch.Tensor],
+                                read_register: torch.Tensor,
+                                write_register: torch.Tensor,
+                                operations: torch.Tensor) -> Dict[str, torch.Tensor]:
+    """Measure whether the latest write to a register is later read and protected.
+
+    Each query is paired with the most recent earlier STORE/UPDATE of the same
+    symbolic register. Fractions use the source write-mask size as denominator.
+    The protected-read excess subtracts the overlap expected if source-written
+    coordinates were unrelated to the current ``(R=1, W=0)`` coordinates.
+    """
+    read = trace["read_mask"] > 0.5
+    write = trace["write_mask"] > 0.5
+    query = operations[..., QUERY]
+    update = operations[..., UPDATE]
+    groups = {
+        "query": query,
+        "query_only": query & ~update,
+        "query_update": query & update,
+    }
+    stats = {}
+    _, sequence_length, hidden_size = read.shape
+    for group_name, selected_timesteps in groups.items():
+        denominator = read.new_zeros((), dtype=torch.float32)
+        source_read = denominator.clone()
+        source_protected = denominator.clone()
+        source_preserved = denominator.clone()
+        source_preserved_read = denominator.clone()
+        chance_protected = denominator.clone()
+        for query_t in range(1, sequence_length):
+            query_register = read_register[:, query_t]
+            eligible = selected_timesteps[:, query_t] & (query_register >= 0)
+            for source_t in range(query_t):
+                same_register = write_register[:, source_t] == query_register
+                if source_t + 1 < query_t:
+                    later_same_register = (
+                        write_register[:, source_t + 1:query_t]
+                        == query_register.unsqueeze(1)).any(dim=1)
+                else:
+                    later_same_register = torch.zeros_like(eligible)
+                use_pair = eligible & same_register & ~later_same_register
+                source = write[use_pair, source_t]
+                current_read = read[use_pair, query_t]
+                current_write = write[use_pair, query_t]
+                protected = current_read & ~current_write
+                preserved = source.clone()
+                for intervening_t in range(source_t + 1, query_t + 1):
+                    preserved &= ~write[use_pair, intervening_t]
+                source_size = source.sum(dtype=torch.float32)
+                denominator += source_size
+                source_read += (source & current_read).sum(dtype=torch.float32)
+                source_protected += (source & protected).sum(dtype=torch.float32)
+                source_preserved += preserved.sum(dtype=torch.float32)
+                source_preserved_read += (preserved & current_read).sum(
+                    dtype=torch.float32)
+                chance_protected += (source.sum(dim=1, dtype=torch.float32)
+                                     * protected.sum(dim=1, dtype=torch.float32)
+                                     / hidden_size).sum()
+        normalizer = denominator.clamp_min(1.0)
+        protected_fraction = source_protected / normalizer
+        stats[f"memory/{group_name}/source_read_fraction"] = source_read / normalizer
+        stats[f"memory/{group_name}/source_protected_read_fraction"] = protected_fraction
+        stats[f"memory/{group_name}/source_preserved_fraction"] = (
+            source_preserved / normalizer)
+        stats[f"memory/{group_name}/source_preserved_read_fraction"] = (
+            source_preserved_read / normalizer)
+        stats[f"memory/{group_name}/protected_read_excess"] = (
+            protected_fraction - chance_protected / normalizer)
     return stats
 
 
@@ -174,8 +285,16 @@ class SelectiveMemoryModule(lit.LightningModule):
         predictions, trace = self(batch["input"], return_routing=True)
         loss = masked_query_mse(predictions, batch["target"], batch["query_mask"])
         metrics = {f"{stage}/query_mse": loss}
+        diagnostics = query_loss_statistics(
+            predictions, batch["target"], batch["operations"])
+        if stage != "train":
+            diagnostics.update(memory_alignment_statistics(
+                trace, batch["read_register"], batch["write_register"],
+                batch["operations"]))
         metrics.update({f"{stage}/{key}": value
                         for key, value in routing_statistics(trace, batch["operations"]).items()})
+        metrics.update({f"{stage}/{key}": value
+                        for key, value in diagnostics.items()})
         self.log_dict(metrics, on_step=stage == "train", on_epoch=True,
                       prog_bar=stage != "train", sync_dist=True,
                       batch_size=batch["input"].size(0))
@@ -217,11 +336,17 @@ class SelectiveMemoryModule(lit.LightningModule):
                 return
             shards = gathered
         tensors = _merge_trace_shards(shards)
-        summary = {key: float(value)
-                   for key, value in routing_statistics(tensors, tensors["operations"]).items()}
+        summary_tensors = routing_statistics(tensors, tensors["operations"])
+        summary_tensors.update(query_loss_statistics(
+            tensors["predictions"], tensors["target"], tensors["operations"]))
+        summary_tensors.update(memory_alignment_statistics(
+            tensors, tensors["read_register"], tensors["write_register"],
+            tensors["operations"]))
+        summary = {key: float(value) for key, value in summary_tensors.items()}
         artifact = {
             "variant": self.hparams.variant,
             "implementation": self.hparams.implementation,
+            "readout_source": "full_post_write_hidden_state",
             "input_layout": {
                 "operation_flags": [0, 3],
                 "write_address": [3, 3 + (self.hparams.input_size - 3

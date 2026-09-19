@@ -14,6 +14,8 @@ from dsrnn.training.selective_memory import (
     SelectiveMemoryRNN,
     _merge_trace_shards,
     masked_query_mse,
+    memory_alignment_statistics,
+    query_loss_statistics,
     routing_statistics,
 )
 from experiments.train_selective_memory import (
@@ -58,8 +60,10 @@ def test_all_baselines_expose_complete_routing_trace_and_backward():
                 assert trace[f"{side}_mask"].shape == (4, 6, 8)
                 assert trace[f"{side}_scores"].shape == (4, 6, 8)
                 assert trace[f"{side}_logits"].shape == (4, 6, 8)
-            expected_read = 4 if variant in ("read_only", "dual") else 8
-            expected_write = 4 if variant in ("write_only", "dual") else 8
+            expected_read = (4 if variant in ("read_only", "shared", "dual")
+                             else 8)
+            expected_write = (4 if variant in ("write_only", "shared", "dual")
+                              else 8)
             assert torch.all(trace["read_mask"].sum(dim=-1) == expected_read)
             assert torch.all(trace["write_mask"].sum(dim=-1) == expected_write)
             assert trace["read_indices"].shape == (4, 6, expected_read)
@@ -75,18 +79,24 @@ def test_all_baselines_expose_complete_routing_trace_and_backward():
                 assert model.read_router.backbone.weight.grad is not None
             if model.write_router is not None:
                 assert model.write_router.backbone.weight.grad is not None
+            if model.shared_router is not None:
+                assert torch.equal(trace["read_mask"], trace["write_mask"])
+                assert torch.equal(trace["read_indices"], trace["write_indices"])
+                assert model.shared_router.backbone.weight.grad is not None
+                assert model.read_budget == model.write_budget == 4
 
 
+@pytest.mark.parametrize("variant", ["shared", "dual"])
 @pytest.mark.parametrize("backward", ["ste", "selected_only"])
-def test_sparse_selective_memory_matches_reference(backward):
+def test_sparse_selective_memory_matches_reference(backward, variant):
     torch.manual_seed(81)
     dataset = SelectiveMemoryDataset(4, n_registers=3, value_size=2, seed=81)
     x = torch.stack([dataset[index]["input"] for index in range(4)]).double()
     reference = SelectiveMemoryRNN(
-        dataset.input_size, 8, 2, "dual", router_context_size=4,
+        dataset.input_size, 8, 2, variant, router_context_size=4,
         router_backward=backward, implementation="reference").double()
     sparse = SelectiveMemoryRNN(
-        dataset.input_size, 8, 2, "dual", router_context_size=4,
+        dataset.input_size, 8, 2, variant, router_context_size=4,
         router_backward=backward, implementation="sparse").double()
     sparse.load_state_dict(reference.state_dict())
     models = []
@@ -115,6 +125,54 @@ def test_routing_statistics_align_joint_operations():
     assert stats["query/state_11"] == 0.25
     assert stats["update/state_10"] == 0.5
     assert stats["update/state_01"] == 0.5
+    assert stats["query_only/state_10"] == 0.0
+    assert stats["query_only/state_01"] == 0.0
+    assert stats["query_only/state_00"] == 0.5
+    assert stats["query_only/state_11"] == 0.5
+    assert stats["query_update/state_10"] == 0.5
+    assert stats["query_update/state_01"] == 0.5
+
+
+def test_query_loss_statistics_split_pure_and_joint_queries():
+    predictions = torch.tensor([[[0.0], [2.0], [3.0]]])
+    targets = torch.zeros_like(predictions)
+    operations = torch.zeros(1, 3, 3, dtype=torch.bool)
+    operations[0, 1, QUERY] = True
+    operations[0, 1, UPDATE] = True
+    operations[0, 2, QUERY] = True
+    stats = query_loss_statistics(predictions, targets, operations)
+    assert stats["query_update_mse"] == 4.0
+    assert stats["query_only_mse"] == 9.0
+
+
+def test_memory_alignment_uses_latest_write_to_queried_register():
+    read = torch.tensor([[[1., 1., 0., 0.],
+                          [0., 0., 1., 1.],
+                          [0., 0., 1., 1.]]])
+    write = torch.tensor([[[1., 1., 0., 0.],
+                           [0., 0., 1., 1.],
+                           [1., 1., 0., 0.]]])
+    operations = torch.zeros(1, 3, 3, dtype=torch.bool)
+    operations[0, 2, QUERY] = True
+    read_register = torch.tensor([[-1, -1, 0]])
+    write_register = torch.tensor([[0, 0, -1]])
+    stats = memory_alignment_statistics(
+        {"read_mask": read, "write_mask": write},
+        read_register, write_register, operations)
+    assert stats["memory/query/source_read_fraction"] == 1.0
+    assert stats["memory/query/source_protected_read_fraction"] == 1.0
+    assert stats["memory/query/source_preserved_fraction"] == 1.0
+    assert stats["memory/query/source_preserved_read_fraction"] == 1.0
+    assert stats["memory/query/protected_read_excess"] == 0.5
+    assert stats["memory/query_only/source_read_fraction"] == 1.0
+    assert stats["memory/query_update/source_read_fraction"] == 0.0
+
+
+def test_shared_mask_requires_one_common_budget():
+    with pytest.raises(ValueError, match="equal read/write sparsity"):
+        SelectiveMemoryRNN(
+            input_size=7, hidden_size=8, value_size=2, variant="shared",
+            read_sparsity=0.25, write_sparsity=0.5)
 
 
 @pytest.mark.parametrize("implementation", IMPLEMENTATIONS)
