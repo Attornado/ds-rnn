@@ -1,0 +1,19 @@
+models: [dense, read_only, write_only, shared, dual]
+hidden_size: 16
+n_registers: 4
+value_size: 2
+router_context_size: 4
+implementation: reference
+train_delays: [0, 2, 8]
+eval_delays: [0, 2, 8, 16]
+horizon: 8
+n_train: 16
+n_val: 8
+n_test: 8
+batch_size: 4
+epochs: 1
+lr_scheduler_patience: 5
+seed: 100
+devices: "1"
+accelerator: cpu
+log_dir: _results/long_memory/smoke

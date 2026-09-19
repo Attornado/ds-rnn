@@ -206,6 +206,9 @@ Measure:
 
 ---
 
+The controlled long-delay implementation and its explicit methodology are
+documented in [long_memory_benchmark.md](long_memory_benchmark.md).
+
 ## 8. Experiment F: compatibility with DS-RNN benchmarks
 
 Only after the controlled experiments work, evaluate on existing repository
