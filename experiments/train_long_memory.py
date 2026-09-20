@@ -16,9 +16,9 @@ from dsrnn.training.scheduler import LRSchedulerConfig
 
 def main():
     parser = build_parser()
-    parser.add_argument("--train_delays", type=int, nargs="+", default=[0, 8, 32, 128, 256])
-    parser.add_argument("--eval_delays", type=int, nargs="+", default=[0, 8, 32, 128, 256, 512])
-    parser.add_argument("--horizon", type=int, default=128)
+    parser.add_argument("--train_delays", type=int, nargs="+", default=[128, 256, 512, 1024])
+    parser.add_argument("--eval_delays", type=int, nargs="+", default=[128, 256, 512, 1024])
+    parser.add_argument("--horizon", type=int, default=1024)
     parser.add_argument("--skip_test", action="store_true",
                         help="Development run: train/validate without inspecting test data.")
     args = _load_config(parser)

@@ -8,9 +8,9 @@ write_sparsity: 0.5
 router_context_size: 16
 router_backward: ste
 implementation: reference
-train_delays: [0, 8, 32, 128]
-eval_delays: [0, 8, 32, 128, 256]
-horizon: 128
+train_delays: [128, 256, 512, 1024]
+eval_delays: [128, 256, 512, 1024]
+horizon: 1024
 n_train: 2048
 n_val: 512
 n_test: 512
