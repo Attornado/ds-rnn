@@ -138,6 +138,35 @@ This reference implementation is intentionally not compute efficient.
 Its purpose is to serve as a numerical oracle for the optimized
 implementation.
 
+### 4.1 GRU reference extension
+
+For long-range experiments, the same routing semantics may wrap a GRU. Define:
+
+\[
+h_t^{read} = r_t \odot h_{t-1}
+\]
+
+and compute the reset gate, update gate, and new content using
+`h_t^{read}` everywhere that the repository's dense GRU uses `h_{t-1}`. The
+GRU proposal is:
+
+\[
+g_t = (1-z_t) \odot n_t + z_t \odot h_t^{read}
+\]
+
+The independently routed write is then:
+
+\[
+h_t = (1-w_t) \odot h_{t-1} + w_t \odot g_t
+\]
+
+Masking the GRU residual with READ is intentional: an unread source coordinate
+must not bypass the recurrent affine transformations through the update-gate
+skip path. With all-one masks this equation is exactly the existing dense GRU;
+with `write=0`, the previous state is preserved exactly. The first GRU version
+is a dense reference implementation. An optimized gathered GRU requires its
+own equivalence tests before any efficiency claim.
+
 ---
 
 ## 5. Efficient two-sided recurrent computation

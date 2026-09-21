@@ -11,6 +11,7 @@ from torch import nn
 
 from dsrnn.data.selective_memory import OPERATION_NAMES, QUERY, UPDATE
 from dsrnn.nn.cells.dual_read_write import DualReadWriteRNNCell
+from dsrnn.nn.cells.dual_read_write_gru import DualReadWriteGRUCell
 from dsrnn.nn.cells.dual_read_write_sparse import SparseDualReadWriteRNNCell
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
 from dsrnn.training.optim import build_optimizer
@@ -19,32 +20,43 @@ from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
 
 MODEL_VARIANTS = ("dense", "read_only", "write_only", "shared", "dual")
 IMPLEMENTATIONS = ("reference", "sparse")
+RECURRENT_CELLS = ("rnn", "gru")
 
 
 class SelectiveMemoryRNN(nn.Module):
-    """Tanh recurrence configured by routing variant and compute implementation."""
+    """Recurrent model configured by cell, routing variant, and implementation."""
 
     def __init__(self, input_size: int, hidden_size: int, value_size: int,
                  variant: str, read_sparsity: float = 0.5,
                  write_sparsity: float = 0.5, router_context_size: int = 8,
-                 router_backward: str = "ste", implementation: str = "reference"):
+                 router_backward: str = "ste", implementation: str = "reference",
+                 recurrent_cell: str = "rnn"):
         super().__init__()
         if variant not in MODEL_VARIANTS:
             raise ValueError(f"Unknown variant {variant!r}; expected one of {MODEL_VARIANTS}.")
         if implementation not in IMPLEMENTATIONS:
             raise ValueError(f"Unknown implementation {implementation!r}; "
                              f"expected one of {IMPLEMENTATIONS}.")
+        if recurrent_cell not in RECURRENT_CELLS:
+            raise ValueError(f"Unknown recurrent cell {recurrent_cell!r}; "
+                             f"expected one of {RECURRENT_CELLS}.")
+        if recurrent_cell == "gru" and implementation != "reference":
+            raise ValueError("The GRU currently has only a reference implementation.")
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.value_size = value_size
         self.variant = variant
         self.router_backward = router_backward
         self.implementation = implementation
+        self.recurrent_cell = recurrent_cell
 
         # Construct shared components before variant-specific routers so that
         # reseeding produces identical recurrent/output initialization.
-        cell_type = (DualReadWriteRNNCell if implementation == "reference"
-                     else SparseDualReadWriteRNNCell)
+        if recurrent_cell == "gru":
+            cell_type = DualReadWriteGRUCell
+        else:
+            cell_type = (DualReadWriteRNNCell if implementation == "reference"
+                         else SparseDualReadWriteRNNCell)
         self.cell = cell_type(input_size, hidden_size)
         self.output = nn.Linear(hidden_size, value_size)
         base = dict(num_channels=hidden_size, input_dim=input_size,
@@ -268,14 +280,15 @@ class SelectiveMemoryModule(lit.LightningModule):
                  optimizer_kwargs: Optional[dict] = None,
                  scheduler_config: Optional[LRSchedulerConfig] = None,
                  analysis_path: Optional[str] = None,
-                 implementation: str = "reference"):
+                  implementation: str = "reference", recurrent_cell: str = "rnn"):
         super().__init__()
         self.save_hyperparameters()
         self.model = SelectiveMemoryRNN(
             input_size=input_size, hidden_size=hidden_size, value_size=value_size,
             variant=variant, read_sparsity=read_sparsity,
             write_sparsity=write_sparsity, router_context_size=router_context_size,
-            router_backward=router_backward, implementation=implementation)
+            router_backward=router_backward, implementation=implementation,
+            recurrent_cell=recurrent_cell)
         self._test_traces = []
 
     def forward(self, x: torch.Tensor, return_routing: bool = False):
@@ -346,6 +359,7 @@ class SelectiveMemoryModule(lit.LightningModule):
         artifact = {
             "variant": self.hparams.variant,
             "implementation": self.hparams.implementation,
+            "recurrent_cell": self.hparams.recurrent_cell,
             "readout_source": "full_post_write_hidden_state",
             "input_layout": {
                 "operation_flags": [0, 3],

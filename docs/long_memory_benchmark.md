@@ -26,12 +26,16 @@ does not change the others. The seed varies both data and initialization.
 
 ## Explicit methodology changes
 
-- Objective: 0.5 * protected-target MSE + 0.5 * distractor-query MSE. Target
-  and distractor losses are averaged per sequence, then over sequences.
-  supervision is not diluted by adding distractor queries. `query_mse` is also
-  reported, but does not select the checkpoint.
-- Validation/checkpoint selection uses the same balanced objective on the
-  mixed in-range validation set. Neither delay 256 nor test data selects it.
+- Objective: protected-target MSE only, averaged over target queries and value
+  dimensions. Distractor operations remain in the input, but their query outputs
+  receive no direct supervision. Gradients still flow through intervening
+  recurrent steps from the target query. `distractor_mse`, `query_mse`, and the
+  legacy `balanced_mse` are diagnostic metrics only.
+- Checkpoint selection and plateau scheduling both monitor `val/target_mse`.
+  This explicitly replaces the earlier 50/50 target/distractor objective for all
+  long-memory configurations. Use fresh run IDs; previous results used a
+  different objective. The manifest/config hash records `loss: target_mse`,
+  and comparison rows now report `best_validation_target_mse`.
 - Train 50 epochs with no early stopping, 2048 sequences per epoch, batch 32.
   This is 64 updates and 315392 input tokens between validation checks, and
   15769600 tokens / 3200 updates per model in total. Plateau patience is 5
@@ -53,8 +57,33 @@ does not change the others. The seed varies both data and initialization.
 - Single-device execution only. No new dependencies. No sparse speedup claims;
   the primary configuration uses the reference implementation. Router counts
   and active recurrent-interaction budgets still differ across controls.
+- Fixed train/validation programs are materialized once and reused by all model
+  variants. The runner prints this preparation stage because long-horizon data
+  construction can take around a minute before Lightning starts training.
+  Held-out condition datasets are likewise reused across variants.
 - Gradient-vs-write-count analysis from Experiment E remains a later analysis;
   this stage tests behavioral retention first.
+
+## GRU development comparison
+
+The GRU extension uses the same five routing variants and the same full
+post-write-state readout. READ masks every recurrent source path in the GRU,
+including its gated residual, and WRITE controls whether each destination
+coordinate commits the GRU proposal. Dense masks therefore reproduce the
+existing dense GRU exactly, while `write=0` still preserves state exactly.
+
+`long_memory_gru_reference.yaml` changes only the recurrent cell family and
+the result directory relative to `long_memory_reference.yaml`. It deliberately
+keeps the already inspected seed and uses `--skip_test` for development. The
+GRU currently has only a dense reference implementation; no sparse speed or
+FLOP claim applies.
+
+Because that reference run contains 537.6 million recurrent timesteps across
+five models, `long_memory_gru_pilot.yaml` is the practical first check. It keeps
+the 128/256/512/1024 delays and hidden size 128, but compares only dense and
+dual for 10 epochs on 512 training programs. This smaller budget is an explicit
+development-only methodology change. If neither model beats the trivial
+baseline, do not spend the full reference budget yet.
 
 ## Launch
 
@@ -63,6 +92,8 @@ From the repository root, with the project environment active:
 ```bash
 python -m experiments.train_long_memory --config experiments/configs/long_memory_smoke.yaml
 python -m experiments.train_long_memory --config experiments/configs/long_memory_reference.yaml --seed 100 --skip_test --run_id development_seed100
+python -m experiments.train_long_memory --config experiments/configs/long_memory_gru_pilot.yaml --skip_test --run_id development_seed100
+python -m experiments.train_long_memory --config experiments/configs/long_memory_gru_reference.yaml --skip_test --run_id development_seed100
 ```
 
 Inspect development validation curves first. Freeze methodology before running

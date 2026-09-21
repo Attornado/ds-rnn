@@ -25,6 +25,7 @@ from dsrnn.training.scheduler import LRSchedulerConfig
 from dsrnn.training.selective_memory import (
     IMPLEMENTATIONS,
     MODEL_VARIANTS,
+    RECURRENT_CELLS,
     SelectiveMemoryModule,
 )
 
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--router_context_size", type=int, default=8)
     parser.add_argument("--router_backward", choices=["ste", "selected_only"], default="ste")
     parser.add_argument("--implementation", choices=IMPLEMENTATIONS, default="reference")
+    parser.add_argument("--recurrent_cell", choices=RECURRENT_CELLS, default="rnn")
     parser.add_argument("--n_train", type=int, default=256)
     parser.add_argument("--n_val", type=int, default=64)
     parser.add_argument("--n_test", type=int, default=64)
@@ -173,7 +175,7 @@ def main() -> None:
         # The shared recurrent and output parameters receive the same initial
         # values in every baseline. Data splits and loader shuffling also reset.
         seed_everything(args.seed, workers=True)
-        run_name = (f"selective-memory-{variant}-{args.implementation}"
+        run_name = (f"selective-memory-{args.recurrent_cell}-{variant}-{args.implementation}"
                     f"-h{args.hidden_size}-seed{args.seed}-{fingerprint}")
         run_tag = re.sub(r"[^A-Za-z0-9]+", "_", run_name).strip("_")
         run_dir = run_root / run_tag
@@ -192,7 +194,8 @@ def main() -> None:
                     "patience": args.lr_scheduler_patience,
                 },
                 interval="epoch", frequency=1, monitor="val/query_mse"),
-            analysis_path=str(analysis_path), implementation=args.implementation)
+            analysis_path=str(analysis_path), implementation=args.implementation,
+            recurrent_cell=args.recurrent_cell)
         checkpoint = ModelCheckpoint(
             dirpath=run_dir / "checkpoints", filename=f"{run_tag}_best",
             monitor="val/query_mse", mode="min", save_top_k=1)
@@ -213,6 +216,7 @@ def main() -> None:
         comparison.append({
             "variant": variant,
             "implementation": args.implementation,
+            "recurrent_cell": args.recurrent_cell,
             "readout_source": "full_post_write_hidden_state",
             "total_parameters": sum(parameter.numel() for parameter in module.parameters()),
             "router_parameters": router_parameters,

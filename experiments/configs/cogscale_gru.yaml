@@ -1,0 +1,23 @@
+# Development benchmark: use --skip_test until the protocol is frozen.
+tasks: [simple_copy, selective_copy, induction_heads, associative_recall]
+difficulty: medium
+models: [dense, read_only, write_only, shared, dual]
+recurrent_cell: gru
+implementation: reference
+hidden_size: 128
+router_context_size: 16
+read_sparsity: 0.5
+write_sparsity: 0.5
+router_backward: ste
+n_train: 1000
+n_val: 200
+n_test: 1000
+batch_size: 32
+epochs: 20
+lr: 0.001
+lr_scheduler_patience: 5
+seed: 100
+split_seed: 2026
+accelerator: auto
+devices: "1"
+log_dir: _results/cogscale/gru

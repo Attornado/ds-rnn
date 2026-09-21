@@ -83,7 +83,41 @@ def test_lightning_metrics_and_bounded_trace(tmp_path):
     artifact = torch.load(tmp_path / "trace.pt", weights_only=False)
     assert artifact["input"].shape[0] == 4
     assert artifact["trace_scope"] == "first_test_batch"
+    assert artifact["loss"] == "target_mse"
+    assert torch.count_nonzero(artifact["task_loss"][~artifact["target_query"]]) == 0
     other = trainer.test(module, dataloaders=DataLoader(ds, batch_size=3), verbose=False)[0]
     for key in ("test/balanced_mse", "test/distractor_mse", "test/target_mse",
                 "test/delay_8/target_mse", "test/target_source_preserved_read_fraction"):
         assert other[key] == pytest.approx(metrics[key], rel=1e-5, abs=1e-7)
+
+
+def test_long_memory_gru_forward_backward():
+    ds = LongMemoryDataset(2, delays=[8], horizon=8)
+    batch = next(iter(DataLoader(ds, batch_size=2)))
+    module = LongMemoryModule(ds.input_size, 16, ds.value_size, "dual",
+                              recurrent_cell="gru")
+    prediction, trace = module(batch["input"], return_routing=True)
+    assert prediction.shape == batch["target"].shape
+    prediction[batch["query_mask"]].square().mean().backward()
+    assert torch.all(trace["read_mask"].sum(-1) == module.model.read_budget)
+    assert torch.all(trace["write_mask"].sum(-1) == module.model.write_budget)
+    for router in (module.model.read_router, module.model.write_router):
+        assert router.backbone.weight.grad is not None
+        assert torch.isfinite(router.backbone.weight.grad).all()
+
+
+def test_only_target_predictions_receive_loss_gradients(monkeypatch):
+    ds = LongMemoryDataset(2, delays=[0, 8], horizon=8)
+    batch = next(iter(DataLoader(ds, batch_size=2)))
+    module = LongMemoryModule(ds.input_size, 8, ds.value_size, "dual")
+    predictions = (batch["target"] + 1).detach().requires_grad_()
+    monkeypatch.setattr(module, "forward", lambda *args, **kwargs: (predictions, {}))
+    monkeypatch.setattr(module, "log", lambda *args, **kwargs: None)
+    loss = module._shared_step(batch, "train")["loss"]
+    torch.testing.assert_close(loss, torch.tensor(1.0))
+    loss.backward()
+    assert torch.count_nonzero(predictions.grad[~batch["target_query"]]) == 0
+    assert (predictions.grad[batch["target_query"]] != 0).all()
+    changed = dict(batch, target=batch["target"].clone())
+    changed["target"][~batch["target_query"]] += 100
+    torch.testing.assert_close(module._shared_step(changed, "train")["loss"], loss)

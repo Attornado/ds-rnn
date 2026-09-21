@@ -1,4 +1,4 @@
-"""Balanced retention/interference objective and delay-resolved diagnostics."""
+"""Target-only retention objective and delay-resolved diagnostics."""
 
 from pathlib import Path
 
@@ -9,10 +9,9 @@ from dsrnn.training.selective_memory import SelectiveMemoryModule, masked_query_
 
 
 class LongMemoryModule(SelectiveMemoryModule):
-    """Same recurrent models/readout, with an explicitly balanced task loss.
+    """Same recurrent models/readout, supervised only at protected targets.
 
-    Half the loss is the protected-target query; half is mean distractor query
-    error. This prevents long delays from diluting target supervision.
+    Other query errors and the legacy balanced metric are diagnostics only.
     Single-device runner; conditional metrics are weighted by query counts.
     """
 
@@ -21,12 +20,12 @@ class LongMemoryModule(SelectiveMemoryModule):
         target = batch["target_query"]
         distractor = batch["query_mask"] & ~target
         target_loss = masked_query_mse(predictions, batch["target"], target)
-        errors = (predictions - batch["target"]).square().mean(-1)
+        errors = (predictions.detach() - batch["target"]).square().mean(-1)
         distractor_loss = ((errors * distractor).sum(1)
                            / distractor.sum(1).clamp_min(1)).mean()
-        loss = 0.5 * (target_loss + distractor_loss)
-        self.log(f"{stage}/balanced_mse", loss, on_step=False, on_epoch=True,
-                 batch_size=predictions.size(0), prog_bar=stage != "train")
+        loss = target_loss
+        self.log(f"{stage}/balanced_mse", 0.5 * (target_loss.detach() + distractor_loss),
+                 on_step=False, on_epoch=True, batch_size=predictions.size(0))
         self.log(f"{stage}/distractor_mse", distractor_loss, on_step=False,
                  on_epoch=True, batch_size=predictions.size(0))
         groups = {"target": target, "distractor_query": distractor,
@@ -40,7 +39,8 @@ class LongMemoryModule(SelectiveMemoryModule):
             if count:
                 self.log(f"{stage}/{name}_mse", masked_query_mse(
                     predictions, batch["target"], mask), on_step=False,
-                    on_epoch=True, batch_size=count)
+                    on_epoch=True, batch_size=count,
+                    prog_bar=stage != "train" and name == "target")
         if stage != "train":
             read, write = trace["read_mask"] > 0.5, trace["write_mask"] > 0.5
             b, q = target.nonzero(as_tuple=True)
@@ -84,7 +84,7 @@ class LongMemoryModule(SelectiveMemoryModule):
             record = {k: v.detach().cpu() for k, v in batch.items()}
             record.update({k: v.detach().cpu() for k, v in trace.items()})
             record["predictions"] = predictions.detach().cpu()
-            record["task_loss"] = (errors * batch["query_mask"]).detach().cpu()
+            record["task_loss"] = (errors * target).cpu()
             self._test_traces.append(record)
         return {"loss": loss}
 
@@ -93,6 +93,9 @@ class LongMemoryModule(SelectiveMemoryModule):
             path = Path(self.hparams.analysis_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             torch.save({"trace_scope": "first_test_batch", "variant": self.hparams.variant,
+                        "loss": "target_mse",
+                        "recurrent_cell": self.hparams.recurrent_cell,
+                        "implementation": self.hparams.implementation,
                         "readout_source": "full_post_write_hidden_state",
                         **self._test_traces[0]}, path)
         self._test_traces.clear()

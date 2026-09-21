@@ -7,6 +7,7 @@ import torch
 
 from dsrnn.data.selective_memory import QUERY, UPDATE, SelectiveMemoryDataset
 from dsrnn.nn.cells.dual_read_write_sparse import SparseDualReadWriteRNNCell
+from dsrnn.nn.cells.dual_read_write_gru import DualReadWriteGRUCell
 from dsrnn.training.selective_memory import (
     IMPLEMENTATIONS,
     MODEL_VARIANTS,
@@ -109,6 +110,32 @@ def test_sparse_selective_memory_matches_reference(backward, variant):
     torch.testing.assert_close(models[1][1].grad, models[0][1].grad)
     for left, right in zip(reference.parameters(), sparse.parameters()):
         torch.testing.assert_close(right.grad, left.grad)
+
+
+@pytest.mark.parametrize("variant", MODEL_VARIANTS)
+def test_gru_selective_memory_forward_backward_and_budgets(variant):
+    torch.manual_seed(82)
+    dataset = SelectiveMemoryDataset(3, n_registers=3, value_size=2, seed=82)
+    x = torch.stack([dataset[index]["input"] for index in range(3)])
+    model = SelectiveMemoryRNN(
+        dataset.input_size, 8, 2, variant, router_context_size=4,
+        recurrent_cell="gru")
+    assert isinstance(model.cell, DualReadWriteGRUCell)
+    predictions, trace = model(x, return_routing=True)
+    assert predictions.shape == (3, 6, 2)
+    assert torch.all(trace["read_mask"].sum(-1) == model.read_budget)
+    assert torch.all(trace["write_mask"].sum(-1) == model.write_budget)
+    predictions.square().mean().backward()
+    for router in (model.read_router, model.write_router, model.shared_router):
+        if router is not None:
+            assert router.backbone.weight.grad is not None
+            assert torch.isfinite(router.backbone.weight.grad).all()
+
+
+def test_gru_rejects_sparse_implementation():
+    with pytest.raises(ValueError, match="only a reference implementation"):
+        SelectiveMemoryRNN(7, 8, 2, "dual", recurrent_cell="gru",
+                           implementation="sparse")
 
 
 def test_routing_statistics_align_joint_operations():

@@ -1,14 +1,13 @@
 """Long-delay register benchmark; preserves the six-step entry point."""
 
 import json
+from time import perf_counter
 import torch
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.loggers import CSVLogger
-
-from experiments.train_selective_memory import (
-    build_parser, _load_config, _devices, _prepare_run_directory, _runtime_metadata,
-)
+from experiments.train_selective_memory import build_parser, _load_config, _devices, _prepare_run_directory, \
+    _runtime_metadata
 from dsrnn.data.long_memory import LongMemoryDataModule
 from dsrnn.training.long_memory import LongMemoryModule
 from dsrnn.training.scheduler import LRSchedulerConfig
@@ -31,10 +30,14 @@ def main():
     if args.n_train % args.batch_size:
         parser.error("n_train must be divisible by batch_size for equal token budgets.")
     torch.set_float32_matmul_precision("medium")
+    # Include the objective in the scientific config/hash, even for old YAMLs.
+    args.loss = "target_mse"
     root, run_id, fingerprint, config = _prepare_run_directory(args)
     length = args.n_registers + args.horizon + 18
     protocol = {
-        "task": "random_register_retention_v1", "loss": "0.5*target_mse+0.5*distractor_mse",
+        "task": "random_register_retention_v1", "loss": "target_mse",
+        "checkpoint_monitor": "val/target_mse", "scheduler_monitor": "val/target_mse",
+        "recurrent_cell": args.recurrent_cell,
         "early_stopping": False, "validation_every_tokens": args.n_train * length,
         "training_tokens_per_model": args.epochs * args.n_train * length,
         "sequence_length": length, "readout": "full_post_write_hidden_state",
@@ -52,6 +55,27 @@ def main():
             data_seed=args.seed, split_seed=args.split_seed,
             delays=delays, horizon=horizon)
 
+    # Materializing long programs is intentionally deterministic but expensive.
+    # Do it once, visibly, instead of making every model rebuild identical data.
+    fit_data = data(args.train_delays, args.horizon)
+    print(f"Preparing fixed train/validation programs "
+          f"({args.n_train} + {args.n_val} sequences of length {length}). "
+          f"Long-horizon preparation may take one or two minutes...",
+          flush=True)
+    preparation_start = perf_counter()
+    fit_data.setup("fit")
+    print(f"Prepared train/validation programs in "
+          f"{perf_counter() - preparation_start:.1f}s.", flush=True)
+
+    evaluation_data = {}
+    if not args.skip_test:
+        conditions = [(d, max(args.horizon, d)) for d in args.eval_delays]
+        if max(args.eval_delays) > args.horizon:
+            conditions.append((min(args.train_delays), max(args.eval_delays)))
+        conditions = list(dict.fromkeys(conditions))
+        evaluation_data = {(delay, horizon): data([delay], horizon)
+                           for delay, horizon in conditions}
+
     comparison = []
     for variant in args.models:
         seed_everything(args.seed, workers=True)
@@ -62,33 +86,33 @@ def main():
             read_sparsity=args.read_sparsity, write_sparsity=args.write_sparsity,
             router_context_size=args.router_context_size, router_backward=args.router_backward,
             implementation=args.implementation,
+            recurrent_cell=args.recurrent_cell,
             optimizer_kwargs={"all": {"lr": args.lr, "weight_decay": args.weight_decay}},
             scheduler_config=LRSchedulerConfig(
                 scheduler_type="reduce_on_plateau", scheduler_kwargs={
                     "mode": "min", "factor": 0.5, "patience": args.lr_scheduler_patience},
-                interval="epoch", frequency=1, monitor="val/balanced_mse"))
+                interval="epoch", frequency=1, monitor="val/target_mse"))
         checkpoint = ModelCheckpoint(dirpath=run_dir / "checkpoints", filename="best",
-                                     monitor="val/balanced_mse", mode="min", save_top_k=1)
+                                     monitor="val/target_mse", mode="min", save_top_k=1)
         trainer = Trainer(max_epochs=args.epochs, accelerator=args.accelerator,
                           devices=1, logger=CSVLogger(run_dir, name="metrics"),
                           callbacks=[checkpoint, LearningRateMonitor(logging_interval="epoch")])
-        trainer.fit(module, datamodule=data(args.train_delays, args.horizon))
-        row = {"variant": variant, "best_checkpoint": checkpoint.best_model_path,
-               "best_validation_balanced_mse": float(checkpoint.best_model_score),
+        trainer.fit(module, datamodule=fit_data)
+        row = {"variant": variant, "recurrent_cell": args.recurrent_cell,
+               "implementation": args.implementation,
+               "best_checkpoint": checkpoint.best_model_path,
+               "best_validation_target_mse": float(checkpoint.best_model_score),
                "total_parameters": sum(p.numel() for p in module.parameters()),
                "router_parameters": sum(p.numel() for n, p in module.named_parameters() if "router" in n),
                "read_budget": module.model.read_budget, "write_budget": module.model.write_budget,
                "optimizer_steps": trainer.global_step, "evaluation": {}}
         if not args.skip_test:
-            conditions = [(d, max(args.horizon, d)) for d in args.eval_delays]
-            if max(args.eval_delays) > args.horizon:
-                conditions.append((min(args.train_delays), max(args.eval_delays)))
-            for delay, horizon in dict.fromkeys(conditions):
+            for (delay, horizon), test_data in evaluation_data.items():
                 label = f"delay_{delay}_horizon_{horizon}"
                 trace_path = run_dir / "artifacts" / (label + ".pt")
                 module.hparams.analysis_path = str(trace_path)
                 # setup('test') generates only the held-out stream.
-                metrics = trainer.test(module, datamodule=data([delay], horizon),
+                metrics = trainer.test(module, datamodule=test_data,
                                        ckpt_path="best", verbose=False)[0]
                 row["evaluation"][label] = {
                     "delay": delay, "sequence_length": args.n_registers + horizon + 18,
