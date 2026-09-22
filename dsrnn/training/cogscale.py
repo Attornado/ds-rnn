@@ -2,9 +2,8 @@
 from typing import Optional, Tuple, Dict, Union
 import torch
 import lightning as lit
-from dsrnn.nn.cells.dual_read_write import DualReadWriteRNNCell
-from dsrnn.nn.cells.dual_read_write_gru import DualReadWriteGRUCell
-from dsrnn.nn.cells.dual_read_write_sparse import SparseDualReadWriteRNNCell
+from dsrnn.nn.cells.dual_read_write import DualReadWriteRNNCell, SparseDualReadWriteRNNCell
+from dsrnn.nn.cells.dual_read_write_gru import DualReadWriteGRUCell, SparseDualReadWriteGRUCell
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
 from dsrnn.training.optim import build_optimizer
 from dsrnn.training.scheduler import LRSchedulerConfig, build_lr_scheduler
@@ -16,7 +15,42 @@ RECURRENT_CELLS = ("rnn", "gru")
 
 
 class CogScaleRNN(torch.nn.Module):
-    """Recurrent model configured by cell, routing variant, and implementation."""
+    """
+    Sequence classifier with independently configurable READ and WRITE routing.
+
+    The model applies one routed recurrent cell at every timestep and projects the complete post-write hidden state to
+    class logits. Routing decisions are conditioned on the current input. Depending on ``variant``, READ and WRITE
+    masks are dense, independently routed, or produced by a shared router.
+
+    Args:
+        input_size: Number of features in each input timestep.
+        hidden_size: Number of recurrent hidden-state coordinates.
+        value_size: Number of output classes. The model emits this many logits
+            at every timestep.
+        variant: Routing baseline to construct. Supported values are ``dense``,
+            ``read_only``, ``write_only``, ``shared``, and ``dual``.
+        read_sparsity: Fraction of hidden coordinates excluded from READ access.
+            Ignored by variants without a READ or shared router.
+        write_sparsity: Fraction of hidden coordinates excluded from WRITE
+            access. Ignored by variants without a WRITE router.
+        router_context_size: Width of the routers' internal context projection.
+        router_backward: Gradient estimator used by hard routing. Supported
+            values are ``ste`` and ``selected_only``.
+        implementation: Recurrent implementation, either ``reference`` or
+            ``sparse``. Both RNN and GRU support gathered sparse execution.
+        recurrent_cell: Recurrent cell family, either ``rnn`` or ``gru``.
+
+    Attributes:
+        cell: Routed recurrent cell used for state transitions.
+        output: Linear projection from the post-write hidden state to logits.
+        read_router: Independent READ router, when required by ``variant``.
+        write_router: Independent WRITE router, when required by ``variant``.
+        shared_router: Common READ/WRITE router for the ``shared`` variant.
+
+    Raises:
+        ValueError: If a model option is unsupported or the shared variant has
+            unequal READ and WRITE sparsities.
+    """
 
     def __init__(self,
                  input_size: int,
@@ -38,8 +72,6 @@ class CogScaleRNN(torch.nn.Module):
         if recurrent_cell not in RECURRENT_CELLS:
             raise ValueError(f"Unknown recurrent cell {recurrent_cell!r}; "
                              f"expected one of {RECURRENT_CELLS}.")
-        if recurrent_cell == "gru" and implementation != "reference":
-            raise ValueError("The GRU currently has only a reference implementation.")
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.value_size = value_size
@@ -50,7 +82,8 @@ class CogScaleRNN(torch.nn.Module):
 
         # Construct shared cell/output before variant-specific routers
         if recurrent_cell == "gru":
-            cell_type = DualReadWriteGRUCell
+            cell_type = (DualReadWriteGRUCell if implementation == "reference"
+                         else SparseDualReadWriteGRUCell)
         else:
             cell_type = DualReadWriteRNNCell if implementation == "reference" else SparseDualReadWriteRNNCell
         self.cell = cell_type(input_size, hidden_size)
@@ -71,12 +104,14 @@ class CogScaleRNN(torch.nn.Module):
 
     @property
     def read_budget(self) -> int:
+        """Return the exact number of readable hidden coordinates per sample."""
         router = (self.read_router if self.read_router is not None
                   else self.shared_router)
         return self.hidden_size if router is None else router.k
 
     @property
     def write_budget(self) -> int:
+        """Return the exact number of writable hidden coordinates per sample."""
         router = (self.write_router if self.write_router is not None
                   else self.shared_router)
         return self.hidden_size if router is None else router.k
@@ -91,6 +126,22 @@ class CogScaleRNN(torch.nn.Module):
                 x: torch.Tensor,
                 h0: Optional[torch.Tensor] = None,
                 return_routing: bool = False) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
+        """
+        Evaluate a batch of sequences.
+
+        Args:
+            x: Input tensor with shape ``(batch, timesteps, input_size)``.
+            h0: Optional initial hidden state with shape ``(batch, hidden_size)``. A zero state is used when omitted.
+            return_routing: Whether to return timestep-level routing tensors together with the logits.
+
+        Returns:
+            Logits with shape ``(batch, timesteps, value_size)``. If ``return_routing`` is true, returns
+            ``(logits, trace)`` instead. ``trace`` contains READ and WRITE masks, selected indices, scores, and logits,
+             each stacked across timesteps.
+
+        Raises:
+            ValueError: If ``x`` is not a three-dimensional batch-first tensor with the configured input feature size.
+        """
         if x.ndim != 3 or x.size(-1) != self.input_size:
             raise ValueError(f"x must have shape (B, T, {self.input_size}).")
         h = x.new_zeros(x.size(0), self.hidden_size) if h0 is None else h0
@@ -129,13 +180,12 @@ class CogScaleRNN(torch.nn.Module):
         predictions = torch.stack(outputs, dim=1)
         if not return_routing:
             return predictions
-        return predictions, {key: torch.stack(value, dim=1)
-                             for key, value in traces.items()}
+        return predictions, {key: torch.stack(value, dim=1) for key, value in traces.items()}
 
 
 def target_loss(logits: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    # Some tasks leave -100 in non-target classes even at scored timesteps.
-    # Match CogScale's timestep mask and argmax, rather than using soft labels.
+    """Computes the cross-entropy loss for a batch of sequences of a CogScale task, masking the irrelevant timesteps."""
+    # Some tasks leave -100 in non-target classes even at scored timesteps, match CogScale's timestep mask and argmax
     mask = (targets != -100).any(-1)
     if not mask.any():
         raise ValueError("Batch contains no scored CogScale targets.")
@@ -144,7 +194,34 @@ def target_loss(logits: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tens
 
 
 class CogScaleModule(lit.LightningModule):
-    """Target-supervised classification with routed recurrent baselines."""
+    """
+    Lightning wrapper for target-supervised CogScale classification.
+
+    CogScale marks unscored output positions with ``-100``. Training, validation, and testing therefore compute
+    cross-entropy and error rate only at scored timesteps. The wrapper owns optimization and scheduler creation;
+    experiment orchestration, checkpointing, and data loading remain in the CogScale experiment runner.
+
+    Args:
+        input_size: Number of features in each input timestep.
+        hidden_size: Number of recurrent hidden-state coordinates.
+        value_size: Number of output classes.
+        variant: Routing baseline passed to :class:`CogScaleRNN`.
+        read_sparsity: Fraction of hidden coordinates excluded from READ access.
+        write_sparsity: Fraction of hidden coordinates excluded from WRITE access.
+        router_context_size: Width of the routers' internal context projection.
+        router_backward: Gradient estimator used by hard routing.
+        optimizer_type: Optimizer name accepted by :func:`dsrnn.training.optim.build_optimizer`.
+        optimizer_kwargs: Optimizer keyword arguments, optionally grouped by parameter category as expected by
+            ``build_optimizer``.
+        scheduler_config: Optional learning-rate scheduler configuration.
+        analysis_path: Deprecated compatibility argument retained so existing CogScale checkpoints can be loaded. It is
+            not saved or used.
+        implementation: Recurrent implementation passed to :class:`CogScaleRNN`.
+        recurrent_cell: Recurrent cell family passed to :class:`CogScaleRNN`.
+
+    Attributes:
+        model: Routed recurrent sequence classifier wrapped by this module.
+    """
 
     def __init__(self,
                  input_size: int,
@@ -174,6 +251,16 @@ class CogScaleModule(lit.LightningModule):
     def forward(self,
                 x: torch.Tensor,
                 return_routing: bool = False) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
+        """
+        Evaluate the routed recurrent model.
+
+        Args:
+            x: Input tensor with shape ``(batch, timesteps, input_size)``.
+            return_routing: Whether to include timestep-level routing traces.
+
+        Returns:
+            Model logits, or ``(logits, trace)`` when ``return_routing`` is true.
+        """
         return self.model(x, return_routing=return_routing)
 
     def training_step(self, batch, batch_idx):
@@ -186,6 +273,13 @@ class CogScaleModule(lit.LightningModule):
         return self._shared_step(batch, "test")
 
     def configure_optimizers(self):
+        """
+        Build the configured optimizer and optional learning-rate scheduler.
+
+        Returns:
+            A Lightning optimizer configuration. When a scheduler is enabled, the result also contains its interval,
+            frequency, and monitored validation metric.
+        """
         optimizer = build_optimizer(
             self.named_parameters(),
             optimizer_type=self.hparams.optimizer_type,

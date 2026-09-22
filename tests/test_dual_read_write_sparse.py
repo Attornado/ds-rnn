@@ -5,7 +5,7 @@ import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from dsrnn.nn.cells.dual_read_write import DualReadWriteRNNCell
-from dsrnn.nn.cells.dual_read_write_sparse import (
+from dsrnn.nn.cells.dual_read_write import (
     SparseDualReadWriteRNNCell,
     _GatheredDualStep,
 )

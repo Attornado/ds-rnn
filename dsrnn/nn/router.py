@@ -3,24 +3,23 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 import torch
-from torch import nn
 from dsrnn.nn.functional import BackwardRule, BudgetRounding, budget_from_sparsity, topk_mask
 
 
 _MLP_ACTIVATIONS = {
-    "identity": nn.Identity,
-    "linear": nn.Identity,
-    "relu": nn.ReLU,
-    "gelu": nn.GELU,
-    "silu": nn.SiLU,
-    "swish": nn.SiLU,
-    "tanh": nn.Tanh,
-    "sigmoid": nn.Sigmoid,
-    "elu": nn.ELU,
+    "identity": torch.nn.Identity,
+    "linear": torch.nn.Identity,
+    "relu": torch.nn.ReLU,
+    "gelu": torch.nn.GELU,
+    "silu": torch.nn.SiLU,
+    "swish": torch.nn.SiLU,
+    "tanh": torch.nn.Tanh,
+    "sigmoid": torch.nn.Sigmoid,
+    "elu": torch.nn.ELU,
 }
 
 
-def _activation(name: str) -> nn.Module:
+def _activation(name: str) -> torch.nn.Module:
     """
     Resolve an activation name to a module.
 
@@ -36,7 +35,7 @@ def _activation(name: str) -> nn.Module:
         raise ValueError(f"Unsupported router activation '{name}'.") from error
 
 
-class ScaledSigmoid(nn.Module):
+class ScaledSigmoid(torch.nn.Module):
     """
     Scaled sigmoid with learnable sharpness and threshold. Computes sigmoid(tau * (x - mu)). tau is stored in log-space
     to keep it positive during optimization.
@@ -59,8 +58,8 @@ class ScaledSigmoid(nn.Module):
             raise ValueError(f"tau_init must be positive, got {tau_init}.")
         self.tau_init = tau_init
         self.mu_init = mu_init
-        self.log_tau = nn.Parameter(torch.log(torch.tensor(tau_init)), requires_grad=learnable)
-        self.mu = nn.Parameter(torch.tensor(mu_init), requires_grad=learnable)
+        self.log_tau = torch.nn.Parameter(torch.log(torch.tensor(tau_init)), requires_grad=learnable)
+        self.mu = torch.nn.Parameter(torch.tensor(mu_init), requires_grad=learnable)
 
     @property
     def tau(self) -> torch.Tensor:
@@ -159,7 +158,7 @@ class RouterOutput:
     logits: torch.Tensor
 
 
-class Router(nn.Module):
+class Router(torch.nn.Module):
     """Map a context vector to a sparse channel mask."""
 
     def __init__(self, config: RouterConfig):
@@ -173,24 +172,24 @@ class Router(nn.Module):
         self.config = config
 
         if config.context_dim is None:
-            self.context_proj = nn.Identity()
+            self.context_proj = torch.nn.Identity()
             backbone_input_dim = config.input_dim
         else:
-            self.context_proj = nn.Linear(config.input_dim, config.context_dim, bias=config.bias)
+            self.context_proj = torch.nn.Linear(config.input_dim, config.context_dim, bias=config.bias)
             backbone_input_dim = config.context_dim
 
         if config.n_layers == 1:
-            self.backbone = nn.Linear(backbone_input_dim, config.num_channels, bias=config.bias)
+            self.backbone = torch.nn.Linear(backbone_input_dim, config.num_channels, bias=config.bias)
         else:
             hidden_dim = config.hidden_dim or backbone_input_dim
             layers = []
             in_features = backbone_input_dim
             for _ in range(config.n_layers - 1):
-                layers.extend((nn.Linear(in_features, hidden_dim, bias=config.bias),
+                layers.extend((torch.nn.Linear(in_features, hidden_dim, bias=config.bias),
                                _activation(config.activation)))
                 in_features = hidden_dim
-            layers.append(nn.Linear(in_features, config.num_channels, bias=config.bias))
-            self.backbone = nn.Sequential(*layers)
+            layers.append(torch.nn.Linear(in_features, config.num_channels, bias=config.bias))
+            self.backbone = torch.nn.Sequential(*layers)
 
         self.scaled_sigmoid = ScaledSigmoid(tau_init=config.tau_init,
                                             mu_init=config.mu_init,
@@ -206,10 +205,10 @@ class Router(nn.Module):
 
     def reset_parameters(self) -> None:
         """Reset projection, backbone, and sigmoid parameters."""
-        if isinstance(self.context_proj, nn.Linear):
+        if isinstance(self.context_proj, torch.nn.Linear):
             self.context_proj.reset_parameters()
         for module in self.backbone.modules():
-            if isinstance(module, nn.Linear):
+            if isinstance(module, torch.nn.Linear):
                 module.reset_parameters()
         self.scaled_sigmoid.reset_parameters()
 

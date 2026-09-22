@@ -1,13 +1,13 @@
 # Gathered dual READ/WRITE cell
 
-`dsrnn.nn.cells.dual_read_write_sparse.SparseDualReadWriteRNNCell` is an
+`dsrnn.nn.cells.dual_read_write.SparseDualReadWriteRNNCell` is an
 opt-in counterpart to `DualReadWriteRNNCell`. It inherits the same constructor,
 initialization and independent routers. Parameter names match, so a reference
 checkpoint can be loaded with `sparse.load_state_dict(reference.state_dict())`.
 The reference implementation and existing experiment defaults are unchanged.
 
 ```python
-from dsrnn.nn.cells.dual_read_write_sparse import SparseDualReadWriteRNNCell
+from dsrnn.nn.cells.dual_read_write import SparseDualReadWriteRNNCell
 from dsrnn.nn.router import RouterConfig
 
 cell = SparseDualReadWriteRNNCell(
@@ -88,4 +88,32 @@ with CUDA; they must be run before claiming GPU equivalence.
 
 The CogScale runner can use this path with
 `--recurrent_cell rnn --implementation sparse`; `reference` remains the default.
-GRU currently supports only the reference implementation.
+Use `--recurrent_cell gru --implementation sparse` for the gathered GRU.
+
+## Gathered GRU
+
+`DualReadWriteGRUCell` and `SparseDualReadWriteGRUCell` live together in
+`dsrnn/nn/cells/dual_read_write_gru.py`. The RNN pair likewise lives together
+in `dsrnn/nn/cells/dual_read_write.py`; the old separate sparse RNN module has
+been removed, so callers must update that import path.
+
+The GRU preserves the repository's reset-before equation (distinct from
+PyTorch's reset-after variant). Reset gates are computed for READ coordinates,
+because those gates multiply recurrent sources. Update/content gates and the
+READ-masked residual are computed for WRITE coordinates. Forward recurrent
+arithmetic is O(B*(k_read^2 + 2*k_write*k_read)), plus input work
+O(B*(k_read + 2*k_write)*D).
+
+The custom backward supports first derivatives for fixed masks, selected-only
+routing, STE, and independent combinations of these rules. Full READ STE
+derivatives additionally compute reset gates at unread coordinates and use
+selected recurrent rows across all source columns. Full WRITE STE derivatives
+recompute proposals at unwritten destinations. Selected-only gradients avoid
+both extensions. All parameter gradients accumulate into dense weight-shaped
+tensors; this implementation is not a sparse optimizer or a speed claim.
+
+The same binary-mask, uniform-budget, dtype/device, and no-autocast contract
+applies. The GRU custom path does not support double backward, including for
+fixed masks. `tests/test_dual_read_write_gru.py` covers reference equivalence,
+mask/parameter/router gradients, empty/full budgets, exact WRITE preservation,
+finite differences, and forward/backward matrix-shape audits.

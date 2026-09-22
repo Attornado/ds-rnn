@@ -12,7 +12,7 @@ from dsrnn.training.cogscale import target_loss, CogScaleModule
 @pytest.mark.parametrize("device", ["cpu", pytest.param(
     "cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"))])
 @pytest.mark.parametrize("cell,implementation", [
-    ("rnn", "reference"), ("rnn", "sparse"), ("gru", "reference")])
+    ("rnn", "reference"), ("rnn", "sparse"), ("gru", "reference"), ("gru", "sparse")])
 @pytest.mark.parametrize("variant", ["dense", "read_only", "write_only", "shared", "dual"])
 def test_routed_model_shapes_budgets_and_gradients(device, cell, implementation, variant):
     from dsrnn.training.cogscale import CogScaleRNN
@@ -35,11 +35,12 @@ def test_routed_model_shapes_budgets_and_gradients(device, cell, implementation,
 
 @pytest.mark.parametrize("variant", ["shared", "dual"])
 @pytest.mark.parametrize("backward", ["ste", "selected_only"])
-def test_sparse_model_matches_reference(variant, backward):
+@pytest.mark.parametrize("cell", ["rnn", "gru"])
+def test_sparse_model_matches_reference(variant, backward, cell):
     from dsrnn.training.cogscale import CogScaleRNN
-    reference = CogScaleRNN(7, 8, 3, variant, router_backward=backward).double()
+    reference = CogScaleRNN(7, 8, 3, variant, router_backward=backward, recurrent_cell=cell).double()
     sparse = CogScaleRNN(7, 8, 3, variant, router_backward=backward,
-                         implementation="sparse").double()
+                         implementation="sparse", recurrent_cell=cell).double()
     sparse.load_state_dict(reference.state_dict())
     x = torch.randn(3, 6, 7, dtype=torch.double)
     outputs = []

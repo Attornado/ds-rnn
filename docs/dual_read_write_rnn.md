@@ -163,9 +163,14 @@ h_t = (1-w_t) \odot h_{t-1} + w_t \odot g_t
 Masking the GRU residual with READ is intentional: an unread source coordinate
 must not bypass the recurrent affine transformations through the update-gate
 skip path. With all-one masks this equation is exactly the existing dense GRU;
-with `write=0`, the previous state is preserved exactly. The first GRU version
-is a dense reference implementation. An optimized gathered GRU requires its
-own equivalence tests before any efficiency claim.
+with `write=0`, the previous state is preserved exactly. Reference and gathered
+GRU implementations live together in `dsrnn/nn/cells/dual_read_write_gru.py`.
+The gathered version computes reset gates on READ sources, and update/content
+gates on WRITE destinations. Its recurrent forward blocks are therefore
+`k_read x k_read`, `k_write x k_read`, and `k_write x k_read`.
+Full STE gradients require extra gathered work during backward; the forward
+cost alone does not establish training speedups. See
+[dual_read_write_sparse.md](dual_read_write_sparse.md) for the supported contract.
 
 ---
 

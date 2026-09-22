@@ -25,8 +25,9 @@ This differs from the old custom register task: classification replaces MSE,
 the library defines the scored targets and sequence structure, and the shipped
 config uses medium difficulty, 1000/200/1000 samples and 20 epochs. Hidden size
 is matched across routing variants; router parameter counts and compute differ.
-GRU is reference-only, with no sparse speed claim. Full post-write state feeds
-the output layer as in existing experiments. Old entry points remain available.
+GRU defaults to the reference implementation; gathered execution is available
+with `--implementation sparse`, with no sparse speed claim. Full post-write
+state feeds the output layer as in existing experiments.
 
 Install if needed in the active project environment:
 

@@ -223,8 +223,6 @@ def main():
     args = _load_config(parser)
     if _devices(args.devices) != 1:
         parser.error("CogScale runner currently requires --devices 1.")
-    if args.recurrent_cell == "gru" and args.implementation != "reference":
-        parser.error("GRU requires --implementation reference.")
     if min(args.n_train, args.n_val, args.n_test, args.epochs, args.batch_size) < 1:
         parser.error("Split sizes, epochs, and batch size must be positive.")
     if args.wandb:
