@@ -131,7 +131,7 @@ def _experiment_loggers(args, directory, manifest, task, variant):
         Pair of the Trainer logger list and the optional W&B run. Each W&B
         run is finished on success or failure before the next model starts.
     """
-    loggers = [CSVLogger(directory, name="metrics")]
+    loggers: list = [CSVLogger(directory, name="metrics")]
     run = None
     exit_code = 1
     try:
@@ -167,8 +167,7 @@ def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Optional YAML config; explicit CLI flags override it.")
-    parser.add_argument("--models", nargs="+", choices=MODEL_VARIANTS,
-                        default=list(MODEL_VARIANTS))
+    parser.add_argument("--models", nargs="+", choices=MODEL_VARIANTS, default=list(MODEL_VARIANTS))
     parser.add_argument("--hidden_size", type=int, default=128)
     parser.add_argument("--read_sparsity", type=float, default=0.5)
     parser.add_argument("--write_sparsity", type=float, default=0.5)
@@ -315,5 +314,7 @@ def main():
                     "results": rows}, indent=2))
                 if wandb_run is not None:
                     wandb_run.summary.update({"result": row, "complete": True})
+
+
 if __name__ == "__main__":
     main()
