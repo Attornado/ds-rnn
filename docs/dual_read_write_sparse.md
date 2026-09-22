@@ -86,5 +86,6 @@ against the reference, checks fixed-mask finite differences and audits executed
 matrix shapes in forward and backward. CUDA cases are available for a machine
 with CUDA; they must be run before claiming GPU equivalence.
 
-The selective-memory experiment can use this path with
-`--implementation sparse`; `reference` remains the default.
+The CogScale runner can use this path with
+`--recurrent_cell rnn --implementation sparse`; `reference` remains the default.
+GRU currently supports only the reference implementation.

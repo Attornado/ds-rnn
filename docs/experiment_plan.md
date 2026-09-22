@@ -39,23 +39,23 @@ Any unavoidable mismatch must be reported.
 
 ---
 
-## 3. Experiment A: synthetic selective memory
+## 3. Experiment A: CogScale memory benchmarks
 
 ### Purpose
 
 Test whether independent read and write access enables behaviors that a single
 mask conflates.
 
-### Example sequence operations
+Use `experiments/train_cogscale.py` for simple copy, selective copy,
+induction heads, and associative recall. The custom register and long-delay
+benchmarks have been retired in favor of these library tasks.
 
-- `STORE A value`
-- `STORE B value`
-- `QUERY A`
-- `UPDATE B value`
-- `QUERY A`
-- `QUERY B`
-
-Construct cases where one memory must be consulted while another is modified.
+Use CogScale's small, medium, or large presets. Optional sequence-length,
+vocabulary, delay, marker-count, and pair-count overrides are recorded in the
+run configuration. Train with cross-entropy only at scored target timesteps;
+report target cross-entropy, error rate, and accuracy on validation at the
+checkpoint selected by validation cross-entropy. Test evaluation is optional
+with `--skip_test`. Keep fixed splits shared across all five routing variants.
 
 ### Primary behavioral hypothesis
 
@@ -77,7 +77,7 @@ for scratch / overwrite locations whose previous value is irrelevant.
 
 ### Measurements
 
-Log per timestep:
+For future mechanistic analyses, collect per timestep:
 
 - read mask
 - write mask
@@ -94,8 +94,8 @@ Measure the empirical frequency of:
 - `(R=0, W=1)`
 - `(R=1, W=1)`
 
-Also measure how these states align with symbolic operations such as STORE,
-QUERY and UPDATE.
+Also measure how these states align with the chosen task's input and target
+positions. These routing analyses are not part of the current runner's metrics.
 
 ---
 
@@ -195,7 +195,7 @@ Possible controlled tasks:
 - delayed copy
 - selective copy
 - associative recall
-- synthetic register-machine tasks
+- induction heads
 
 Measure:
 
@@ -206,8 +206,7 @@ Measure:
 
 ---
 
-The controlled long-delay implementation and its explicit methodology are
-documented in [long_memory_benchmark.md](long_memory_benchmark.md).
+Use the CogScale runner's task-size overrides for length and distractor sweeps.
 
 ## 8. Experiment F: compatibility with DS-RNN benchmarks
 
@@ -245,6 +244,6 @@ Do not proceed to broad benchmark scaling if:
 - the reference and optimized implementations disagree
 - write protection is not exact
 - gradients do not reach both router heads
-- the synthetic selective-memory task does not show meaningful independent
+- the CogScale tasks do not show meaningful independent
   read/write behavior
 - the optimized implementation still performs the full dense recurrent matmul

@@ -210,20 +210,21 @@ Return:
 
 ---
 
-## Prompt 8 — Synthetic selective-memory benchmark
+## Prompt 8 — CogScale memory benchmarks
 
 Read `docs/experiment_plan.md`.
 
-Implement only the synthetic selective-memory experiment.
+Use the existing `experiments/train_cogscale.py` runner.
 
-The benchmark must contain cases where the model needs to consult one memory
-while modifying another.
+Evaluate simple copy, selective copy, induction heads, and associative recall
+using CogScale presets or explicit task-size overrides.
 
 Compare:
 
 - dense recurrent baseline
 - read-only DS baseline
 - write-only selective-update baseline
+- shared-mask baseline
 - dual read/write model
 
 Log enough information to measure:
@@ -231,7 +232,7 @@ Log enough information to measure:
 - read-mask activity
 - write-mask activity
 - frequencies of the four `(R,W)` states
-- alignment of those states with STORE / QUERY / UPDATE operations
+- alignment of those states with task input and target positions
 
 Do not modify existing benchmark methodology.
 
