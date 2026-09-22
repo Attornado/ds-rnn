@@ -183,8 +183,14 @@ def main():
                               logger=CSVLogger(directory, name="metrics"),
                               callbacks=[checkpoint, LearningRateMonitor(logging_interval="epoch")])
             trainer.fit(module, train_dataloaders=loader("train"), val_dataloaders=loader("valid"))
+            # Final-epoch callback metrics need not describe the selected model.
+            # Re-evaluate the best checkpoint on validation, including skip_test runs.
+            validation = trainer.validate(module, dataloaders=loader("valid"),
+                                          ckpt_path="best", verbose=False)[0]
+            validation["val/accuracy"] = 1.0 - validation["val/error_rate"]
             row = {"task": task, "variant": variant,
                    "best_validation_target_ce": float(checkpoint.best_model_score),
+                   "validation": validation,
                    "best_checkpoint": checkpoint.best_model_path,
                    "total_parameters": sum(p.numel() for p in module.parameters()),
                    "read_budget": module.model.read_budget, "write_budget": module.model.write_budget,

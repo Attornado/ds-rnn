@@ -50,6 +50,11 @@ After freezing methodology, omit `--skip_test` for fresh confirmatory seeds and
 unique run IDs. Inspect per-task CSV curves, checkpoints, manifest, and
 comparison.json. Manifests include the library version, effective task
 parameters, actual input/target shapes, objective, and runtime/source metadata.
+Each comparison row includes `validation` with target cross-entropy, error rate,
+and accuracy evaluated at the checkpoint selected by validation cross-entropy.
+This is populated even with `--skip_test`; `evaluation` remains reserved for
+held-out test results. These are metrics of the same checkpoint, not independent
+best values from different epochs. Validation is rerun once after each fit.
 CogScale copy sequence_length parameters may differ from returned total length;
 use recorded shapes for interpreting sequence length.
 
