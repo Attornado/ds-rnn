@@ -218,6 +218,7 @@ def build_parser():
 
 
 def main():
+    torch.set_float32_matmul_precision('medium')
     parser = build_parser()
     args = _load_config(parser)
     if _devices(args.devices) != 1:
