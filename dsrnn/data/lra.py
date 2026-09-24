@@ -350,7 +350,9 @@ class CIFAR10SeqDataModule(lit.LightningDataModule):
                  batch_size: int = 1024,
                  num_workers: int = 4,
                  pin_memory: bool = False,
-                 as_float: bool = True, ):
+                 as_float: bool = True,
+                 split_seed: Optional[int] = None,
+                 val_split: float = 0.1):
         super().__init__()
         self.save_hyperparameters()
         self.save_hyperparameters({"task": "scifar10"})
@@ -359,6 +361,10 @@ class CIFAR10SeqDataModule(lit.LightningDataModule):
         self.num_workers = num_workers
         self.pin_memory = pin_memory and torch.cuda.is_available()
         self.as_float = as_float
+        self.split_seed = split_seed
+        if not 0 < val_split < 1:
+            raise ValueError("val_split must be between 0 and 1.")
+        self.val_split = val_split
 
         self.train_dataset: Optional[Dataset] = None
         self.val_dataset: Optional[Dataset] = None
@@ -411,14 +417,16 @@ class CIFAR10SeqDataModule(lit.LightningDataModule):
         return TensorDataset(x, y)
 
     def setup(self, stage: Optional[str] = None):
-        if stage in (None, "fit"):
+        if stage in (None, "fit", "validate") and self.train_dataset is None:
             full_train = self._load_split("train")
             total = len(full_train)
-            val_len = int(0.1 * total)
+            val_len = int(self.val_split * total)
             train_len = total - val_len
             self.train_dataset, self.val_dataset = random_split(
                 full_train,
                 [train_len, val_len],
+                generator=(torch.Generator().manual_seed(self.split_seed)
+                           if self.split_seed is not None else None),
             )
         if stage in (None, "test"):
             self.test_dataset = self._load_split("test")

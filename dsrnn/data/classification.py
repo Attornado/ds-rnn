@@ -27,6 +27,20 @@ class LabelRemappingDataset(Dataset):
         return image, self.label_map[label]
 
 
+class PixelSequence:
+    """Flatten an image tensor into pixel chunks with an optional fixed order."""
+
+    def __init__(self, subseq_len: int, permutation: Optional[torch.Tensor] = None):
+        self.subseq_len = subseq_len
+        self.permutation = permutation
+
+    def __call__(self, image: torch.Tensor) -> torch.Tensor:
+        pixels = image.flatten()
+        if self.permutation is not None:
+            pixels = pixels[self.permutation]
+        return pixels.reshape(-1, self.subseq_len)
+
+
 class SequentialMNISTDataModule(lit.LightningDataModule):
     """LightningDataModule for the sequential MNIST benchmark.
 
@@ -43,7 +57,9 @@ class SequentialMNISTDataModule(lit.LightningDataModule):
             val_split: float = 0.1,
             sequential_order: str = "scan",
             subseq_len: int = 28,
-            data_path: str = ""
+            data_path: str = "",
+            split_seed: Optional[int] = None,
+            permutation_seed: Optional[int] = None,
     ):
         super().__init__()
 
@@ -57,11 +73,20 @@ class SequentialMNISTDataModule(lit.LightningDataModule):
         self._val_split: float = val_split
         self._sequential_order: str = sequential_order
         self._subseq_len: int = subseq_len
+        self.split_seed = split_seed
+        if sequential_order not in ("scan", "random"):
+            raise ValueError("sequential_order must be 'scan' or 'random'.")
+        if not 0 < val_split < 1:
+            raise ValueError("val_split must be between 0 and 1.")
+        generator = (torch.Generator().manual_seed(permutation_seed)
+                     if permutation_seed is not None else None)
+        self.permutation = (torch.randperm(784, generator=generator)
+                            if sequential_order == "random" else None)
 
         self._transform = transforms.Compose(
             [
                 transforms.ToTensor(),
-                transforms.Lambda(lambda t: t.view(-1, subseq_len)),
+                PixelSequence(subseq_len, self.permutation),
             ]
         )
 
@@ -104,7 +129,7 @@ class SequentialMNISTDataModule(lit.LightningDataModule):
         datasets.MNIST(self.root, train=False, download=True)
 
     def setup(self, stage: Optional[str] = None):
-        if stage == "fit" or stage is None:
+        if stage in (None, "fit", "validate") and self.train_dataset is None:
             full_train = datasets.MNIST(
                 self.root,
                 train=True,
@@ -113,7 +138,9 @@ class SequentialMNISTDataModule(lit.LightningDataModule):
             val_size = int(self.val_split * len(full_train))
             train_size = len(full_train) - val_size
             self.train_dataset, self.val_dataset = random_split(
-                full_train, [train_size, val_size]
+                full_train, [train_size, val_size],
+                generator=(torch.Generator().manual_seed(self.split_seed)
+                           if self.split_seed is not None else None),
             )
 
         if stage == "test" or stage is None:
@@ -122,16 +149,6 @@ class SequentialMNISTDataModule(lit.LightningDataModule):
                 train=False,
                 transform=self.transform,
             )
-
-        if self.sequential_order == "random":
-            perm = torch.randperm(28 * 28)
-            for ds in [getattr(self, attr)
-                       for attr in ("train_dataset", "val_dataset", "test_dataset")]:
-                if ds is not None:
-                    ds.transform = transforms.Compose([
-                        transforms.ToTensor(),
-                        transforms.Lambda(lambda t, p=perm: t.view(-1)[p].view(-1, self.subseq_len)),
-                    ])
 
     def train_dataloader(self):
         return DataLoader(

@@ -4,52 +4,46 @@ from dataclasses import replace
 from decimal import Decimal
 from math import ceil
 from typing import Optional, Tuple
-
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.autograd.function import once_differentiable
-
 from dsrnn.nn.router import Router, RouterConfig, RouterOutput
 from dsrnn.nn.functional import BackwardRule
 from dsrnn.nn.cells.dual_read_write import _prepare_sparse_routing
 
 
 class DualReadWriteGRUCell(nn.Module):
-    """Dense reference GRU with independent READ and WRITE masks.
+    """
+    Dense reference GRU with independent READ and WRITE masks.
 
-    ``read_mask`` is applied to the previous state before every recurrent GRU
-    path, including the gated residual in the GRU proposal. ``write_mask`` is
-    then applied to that proposal, so an unwritten coordinate is preserved
-    exactly. With both masks equal to one this matches the repository's
-    reset-before ``GRUCell`` (not PyTorch's reset-after GRU). All three gates
-    share each routing mask; reset gates multiply sources before the content
-    recurrent affine transform.
+    ``read_mask`` is applied to the previous state before every recurrent GRU path, including the gated residual in the
+     GRU proposal. ``write_mask`` is then applied to that proposal, so an unwritten coordinate is preserved exactly.
+     With both masks equal to one this matches the repository's reset-before ``GRUCell`` (not PyTorch's
+     reset-after GRU). All three gates share each routing mask; reset gates multiply sources before the content
+     recurrent affine transform.
 
     Args:
         input_size: Number of input features; must be positive.
         hidden_size: Number of hidden-state coordinates; must be positive.
         bias: Whether to include input and recurrent biases for each gate.
-        read_router_config: Optional READ router configuration matching the
-            input and hidden dimensions. Requires ``write_router_config``.
-        write_router_config: Optional independent WRITE router configuration.
-            When both configs are omitted, explicit masks are required.
+        read_router_config: Optional READ router configuration matching the input and hidden dimensions. Requires
+            ``write_router_config``.
+        write_router_config: Optional independent WRITE router configuration. When both configs are omitted, explicit
+            masks are required.
 
     Attributes:
         weight_ih: Input weights with shape ``(3 * hidden_size, input_size)``.
-        weight_hh: Recurrent weights with shape
-            ``(3 * hidden_size, hidden_size)``. Gate order is reset, update,
-            content for weights and biases.
+        weight_hh: Recurrent weights with shape ``(3 * hidden_size, hidden_size)``. Gate order is reset, update, content
+            for weights and biases.
         read_mask: READ mask from the latest forward call, or None initially.
         write_mask: WRITE mask from the latest forward call, or None initially.
-        last_read_routing: Latest internal READ router output, or None when
-            an external mask was used.
-        last_write_routing: Latest internal WRITE router output, or None when
-            an external mask was used.
+        last_read_routing: Latest internal READ router output, or None when an external mask was used.
+        last_write_routing: Latest internal WRITE router output, or None when an external mask was used.
 
     Raises:
-        ValueError: If dimensions are nonpositive, only one router config is
-            supplied, or router dimensions do not match the cell.
+        ValueError: If dimensions are nonpositive, only one router config is supplied, or router dimensions do not match
+            the cell.
     """
 
     def __init__(self,
@@ -106,7 +100,8 @@ class DualReadWriteGRUCell(nn.Module):
                 router.reset_parameters()
 
     def compute_routing(self, x: torch.Tensor) -> Tuple[RouterOutput, RouterOutput]:
-        """Compute independent input-conditioned routing without changing state.
+        """
+        Compute independent input-conditioned routing without changing state.
 
         Args:
             x: Input tensor with shape ``(batch, input_size)``.
@@ -127,19 +122,17 @@ class DualReadWriteGRUCell(nn.Module):
                 *,
                 read_mask: Optional[torch.Tensor] = None,
                 write_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute one reset-before GRU step and apply independent WRITE gating.
+        """
+        Compute one reset-before GRU step and apply independent WRITE gating.
 
         Args:
             x: Input tensor with shape ``(batch, input_size)``.
             hx: Previous state with shape ``(batch, hidden_size)``; defaults
                 to zeros with the input's device and dtype.
-            read_mask: READ multipliers with shape ``(batch, hidden_size)``.
-                Uses the internal READ router when omitted. Fractional values
-                are supported by this reference implementation.
-            write_mask: WRITE multipliers with shape ``(batch, hidden_size)``.
-                Uses the internal WRITE router when omitted. Zero preserves
-                the corresponding state exactly, including when its unused
-                proposal is nonfinite.
+            read_mask: READ multipliers with shape ``(batch, hidden_size)``. Uses the internal READ router when omitted.
+                Fractional values are supported by this reference implementation.
+            write_mask: WRITE multipliers with shape ``(batch, hidden_size)``. Uses the internal WRITE router when
+                omitted. Zero preserves the corresponding state exactly, including when unused proposal is nonfinite.
 
         Returns:
             Pair ``(output, new_state)`` referring to the same tensor with
