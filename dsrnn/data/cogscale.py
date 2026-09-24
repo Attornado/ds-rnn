@@ -1,20 +1,22 @@
 """CogScale data generation and validated preset overrides."""
-
 from copy import deepcopy
-from typing import Final, Tuple
+from typing import Final, Tuple, Optional, Dict, Iterable, Any
+import cogscale as cog
+
 
 TASKS: Final[Tuple] = ("simple_copy", "selective_copy", "induction_heads", "associative_recall")
 TASK_SIZE_OPTIONS: Final[Tuple] = ("sequence_length", "n_symbols", "delay", "n_markers", "num_pairs")
 
 
-def resolve_task_sizes(task, difficulty, overrides=None):
-    """Resolve and validate task sizes without changing library presets.
+def resolve_task_sizes(task: str, difficulty: str, overrides: Optional[Dict[str, int]] = None) -> Dict[str, int]:
+    """
+    Resolve and validate task sizes without changing library presets.
 
     Args:
         task: Supported CogScale task name.
         difficulty: Library preset: small, medium, or large.
-        overrides: Optional mapping of size names to integers. None retains the
-            preset; options for other tasks are ignored.
+        overrides: Optional mapping of size names to integers. None retains the preset; options for other tasks are
+            ignored.
 
     Returns:
         Dictionary of effective size parameters applicable to this task.
@@ -22,7 +24,6 @@ def resolve_task_sizes(task, difficulty, overrides=None):
     Raises:
         ValueError: An override is unknown or effective sizes are invalid.
     """
-    import cogscale as cog
     params = deepcopy(getattr(cog.evals, "cogscale_" + difficulty)[task]["params"])
     for name, value in (overrides or {}).items():
         if name not in TASK_SIZE_OPTIONS:
@@ -48,8 +49,11 @@ def resolve_task_sizes(task, difficulty, overrides=None):
     return sizes
 
 
-def resolve_task_overrides(tasks, difficulty, overrides=None):
-    """Validate overrides across all selected tasks before generating data.
+def resolve_task_overrides(tasks: Iterable[str],
+                           difficulty: str,
+                           overrides: Optional[Dict[str, int]] = None) -> Dict[str, Dict[str, int]]:
+    """
+    Validate overrides across all selected tasks before generating data.
 
     Args:
         tasks: Iterable of supported task names.
@@ -69,8 +73,16 @@ def resolve_task_overrides(tasks, difficulty, overrides=None):
     return sizes
 
 
-def build_data(task, difficulty, seed, n_train, n_val, n_test, *, overrides=None):
-    """Generate fixed classification splits while restoring library presets.
+def build_data(task: str,
+               difficulty: str,
+               seed: int,
+               n_train: int,
+               n_val: int,
+               n_test: int,
+               *,
+               overrides: Optional[Dict[str, int]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Generate fixed classification splits while restoring library presets.
 
     Args:
         task: Supported CogScale task name.
@@ -82,15 +94,14 @@ def build_data(task, difficulty, seed, n_train, n_val, n_test, *, overrides=None
         overrides: Optional size overrides; None values retain preset sizes.
 
     Returns:
-        Pair of the library data dictionary and a copy of the effective task
-        parameters. Data includes X/Y arrays for train, valid, and test splits.
+        Pair of the library data dictionary and a copy of the effective task parameters. Data includes X/Y arrays for
+        train, valid, and test splits.
 
     Raises:
         ValueError: Sizes are invalid or the task is not classification.
     """
-    import cogscale as cog
-    # CogScale 0.2.0 mutates its preset dictionary in build_task. Restore it so
-    # repeated calls in the same process cannot contaminate subsequent tasks.
+    # CogScale 0.2.0 mutates its preset dictionary in build_task. Restore it so repeated calls in the same process
+    # cannot contaminate subsequent tasks.
     registry = getattr(cog.evals, "cogscale_" + difficulty)
     original = deepcopy(registry[task]["params"])
     sizes = resolve_task_sizes(task, difficulty, overrides)
