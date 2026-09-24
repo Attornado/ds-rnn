@@ -1,7 +1,59 @@
+import math
 from typing import Final, Dict, Optional
 from functools import partial
 import torch
 from einops import rearrange
+
+
+
+class ScaledSigmoid(torch.nn.Module):
+    """
+    Scaled sigmoid with learnable sharpness and threshold. Computes sigmoid(tau * (x - mu)). tau is stored in log-space
+    to keep it positive during optimization.
+    """
+
+    def __init__(self,
+                 tau_init: float = 1.0,
+                 mu_init: float = 0.0,
+                 learnable: bool = True):
+        """
+        Initialize the scaled sigmoid.
+
+        Args:
+            tau_init: Initial sharpness. Must be positive.
+            mu_init: Initial threshold.
+            learnable: Whether tau and mu are learnable parameters.
+        """
+        super().__init__()
+        if tau_init <= 0:
+            raise ValueError(f"tau_init must be positive, got {tau_init}.")
+        self.tau_init = tau_init
+        self.mu_init = mu_init
+        self.log_tau = torch.nn.Parameter(torch.log(torch.tensor(tau_init)), requires_grad=learnable)
+        self.mu = torch.nn.Parameter(torch.tensor(mu_init), requires_grad=learnable)
+
+    @property
+    def tau(self) -> torch.Tensor:
+        """Return the current sharpness."""
+        return self.log_tau.exp()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply the scaled sigmoid.
+
+        Args:
+            x: Input tensor.
+
+        Returns:
+            Tensor of the same shape with values in (0, 1).
+        """
+        return torch.sigmoid(self.tau * (x - self.mu))
+
+    def reset_parameters(self) -> None:
+        """Reset tau and mu to their initial values."""
+        with torch.no_grad():
+            self.log_tau.fill_(math.log(self.tau_init))
+            self.mu.fill_(self.mu_init)
 
 
 class SteepSigmoid(torch.nn.Module):

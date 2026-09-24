@@ -1,88 +1,13 @@
 """Input-dependent channel router."""
-import math
 from dataclasses import dataclass
 from typing import Optional
 import torch
+from dsrnn.nn.activations import resolve_activation, ScaledSigmoid
 from dsrnn.nn.functional import BackwardRule, BudgetRounding, budget_from_sparsity, topk_mask
 
 
-_MLP_ACTIVATIONS = {
-    "identity": torch.nn.Identity,
-    "linear": torch.nn.Identity,
-    "relu": torch.nn.ReLU,
-    "gelu": torch.nn.GELU,
-    "silu": torch.nn.SiLU,
-    "swish": torch.nn.SiLU,
-    "tanh": torch.nn.Tanh,
-    "sigmoid": torch.nn.Sigmoid,
-    "elu": torch.nn.ELU,
-}
 
 
-def _activation(name: str) -> torch.nn.Module:
-    """
-    Resolve an activation name to a module.
-
-    Args:
-        name: Activation name.
-
-    Returns:
-        The activation module.
-    """
-    try:
-        return _MLP_ACTIVATIONS[name]()
-    except KeyError as error:
-        raise ValueError(f"Unsupported router activation '{name}'.") from error
-
-
-class ScaledSigmoid(torch.nn.Module):
-    """
-    Scaled sigmoid with learnable sharpness and threshold. Computes sigmoid(tau * (x - mu)). tau is stored in log-space
-    to keep it positive during optimization.
-    """
-
-    def __init__(self,
-                 tau_init: float = 1.0,
-                 mu_init: float = 0.0,
-                 learnable: bool = True):
-        """
-        Initialize the scaled sigmoid.
-
-        Args:
-            tau_init: Initial sharpness. Must be positive.
-            mu_init: Initial threshold.
-            learnable: Whether tau and mu are learnable parameters.
-        """
-        super().__init__()
-        if tau_init <= 0:
-            raise ValueError(f"tau_init must be positive, got {tau_init}.")
-        self.tau_init = tau_init
-        self.mu_init = mu_init
-        self.log_tau = torch.nn.Parameter(torch.log(torch.tensor(tau_init)), requires_grad=learnable)
-        self.mu = torch.nn.Parameter(torch.tensor(mu_init), requires_grad=learnable)
-
-    @property
-    def tau(self) -> torch.Tensor:
-        """Return the current sharpness."""
-        return self.log_tau.exp()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Apply the scaled sigmoid.
-
-        Args:
-            x: Input tensor.
-
-        Returns:
-            Tensor of the same shape with values in (0, 1).
-        """
-        return torch.sigmoid(self.tau * (x - self.mu))
-
-    def reset_parameters(self) -> None:
-        """Reset tau and mu to their initial values."""
-        with torch.no_grad():
-            self.log_tau.fill_(math.log(self.tau_init))
-            self.mu.fill_(self.mu_init)
 
 
 @dataclass
@@ -186,7 +111,7 @@ class Router(torch.nn.Module):
             in_features = backbone_input_dim
             for _ in range(config.n_layers - 1):
                 layers.extend((torch.nn.Linear(in_features, hidden_dim, bias=config.bias),
-                               _activation(config.activation)))
+                               resolve_activation(config.activation)))
                 in_features = hidden_dim
             layers.append(torch.nn.Linear(in_features, config.num_channels, bias=config.bias))
             self.backbone = torch.nn.Sequential(*layers)
