@@ -16,6 +16,7 @@ import json
 from time import perf_counter
 import torch
 import yaml
+import cogscale as cog
 from torch.utils.data import DataLoader, TensorDataset
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
@@ -218,8 +219,11 @@ def build_parser():
 
 def main():
     torch.set_float32_matmul_precision('medium')
+
+    # Load arguments and logger
     parser = build_parser()
     args = _load_config(parser)
+
     if _devices(args.devices) != 1:
         parser.error("CogScale runner currently requires --devices 1.")
     if min(args.n_train, args.n_val, args.n_test, args.epochs, args.batch_size) < 1:
@@ -229,7 +233,8 @@ def main():
             import wandb
         except ImportError:
             parser.error("W&B logging requires the optional dependency: pip install '.[wandb]'.")
-    import cogscale as cog
+
+    # Load cogscale data
     overrides = {name: getattr(args, name) for name in TASK_SIZE_OPTIONS}
     try:
         resolved_sizes = resolve_task_overrides(args.tasks, args.difficulty, overrides)
@@ -244,10 +249,11 @@ def main():
                              "mask": "any target channel != -100",
                              "data": "fixed CogScale splits shared across variants",
                              "early_stopping": False, "readout": "full_post_write_hidden_state"}}
+
     rows = []
     for task in args.tasks:
-        print(f"Generating CogScale {task} ({args.difficulty}), "
-              f"sizes={resolved_sizes[task]}...", flush=True)
+        print(f"Generating CogScale {task} ({args.difficulty}), sizes={resolved_sizes[task]}...", flush=True)
+        # Get parameters and data for the current task
         start = perf_counter()
         data, params = build_data(task, args.difficulty, args.split_seed,
                                    args.n_train, args.n_val, args.n_test, overrides=overrides)
@@ -259,9 +265,12 @@ def main():
                                    "target_shape": list(data["Y_train"].shape)}
         (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
         print(f"Generated in {perf_counter() - start:.2f}s; input shape {data['X_train'].shape}", flush=True)
+
         for variant in args.models:
             seed_everything(args.seed, workers=True)
             directory = root / task / variant
+
+            # Create the model
             module = CogScaleModule(
                 input_size=data["X_train"].shape[-1], hidden_size=args.hidden_size,
                 value_size=data["Y_train"].shape[-1], variant=variant,
@@ -273,10 +282,14 @@ def main():
                     scheduler_type="reduce_on_plateau", scheduler_kwargs={
                         "mode": "min", "factor": 0.5, "patience": args.lr_scheduler_patience},
                     interval="epoch", frequency=1, monitor="val/target_ce"))
-            def loader(split):
+
+            # Dataloader creation
+            def loader(split: str) -> DataLoader:
                 return DataLoader(datasets[split], batch_size=args.batch_size,
                                   shuffle=split == "train", num_workers=args.num_workers,
                                   generator=torch.Generator().manual_seed(args.split_seed + 1))
+
+            # Create the trainer and launch the experiment
             checkpoint = ModelCheckpoint(dirpath=directory / "checkpoints", filename="best",
                                          monitor="val/target_ce", mode="min", save_top_k=1)
             with _experiment_loggers(args, directory, manifest, task, variant) as (loggers, wandb_run):
@@ -296,10 +309,12 @@ def main():
                        "total_parameters": sum(p.numel() for p in module.parameters()),
                        "read_budget": module.model.read_budget, "write_budget": module.model.write_budget,
                        "optimizer_steps": trainer.global_step, "evaluation": {}}
+
+                # Test the model
                 if not args.skip_test:
                     row["evaluation"] = trainer.test(module, dataloaders=loader("test"),
                                                       ckpt_path="best", verbose=False)[0]
-                    # Use the library's public scorer on the same restored checkpoint.
+                    # Use the library's public scorer on the same restored checkpoint
                     module.eval()
                     scores, counts = [], []
                     with torch.no_grad():
