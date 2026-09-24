@@ -149,26 +149,100 @@ def test_yaml_sizes_and_cli_override(tmp_path, monkeypatch):
 
 
 def test_run_directories_are_unique_and_config_hashed(tmp_path, monkeypatch):
-    from experiments.train_cogscale import build_parser, _RUN_ID_ENV, _prepare_run_directory
+    from experiments.train_cogscale import build_parser, _prepare_run_directory
     parser = build_parser()
     args = parser.parse_args([])
     args.log_dir = str(tmp_path)
     args.run_id = "review_run"
-    monkeypatch.delenv(_RUN_ID_ENV, raising=False)
     run_root, run_id, reference_hash, _ = _prepare_run_directory(args)
     assert run_id == "review_run"
     assert run_root.is_dir()
 
-    monkeypatch.delenv(_RUN_ID_ENV, raising=False)
     with pytest.raises(FileExistsError):
         _prepare_run_directory(args)
 
-    monkeypatch.delenv(_RUN_ID_ENV, raising=False)
     args.run_id = "sparse_run"
     args.implementation = "sparse"
     sparse_root, _, sparse_hash, _ = _prepare_run_directory(args)
     assert sparse_root.is_dir()
     assert sparse_hash != reference_hash
+
+
+def test_extend_existing_run_preserves_results_and_skips_completed(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    import experiments.train_cogscale as runner
+
+    base = ["train_cogscale", "--log_dir", str(tmp_path), "--run_id", "extend",
+            "--models", "dense", "--difficulty", "small", "--epochs", "1",
+            "--n_train", "2", "--n_val", "2", "--n_test", "2",
+            "--batch_size", "2", "--hidden_size", "4", "--accelerator", "cpu",
+            "--skip_test", "--no-wandb"]
+    monkeypatch.setattr("sys.argv", [*base, "--tasks", "simple_copy"])
+    runner.main()
+    root = tmp_path / "extend"
+    first = json.loads((root / "comparison.json").read_text())
+    checkpoint = Path(first["results"][0]["best_checkpoint"])
+    saved_checkpoint = checkpoint.read_bytes()
+    unfinished = root / "induction_heads" / "dense" / "checkpoints" / "interrupted.ckpt"
+    unfinished.parent.mkdir(parents=True)
+    unfinished.write_bytes(b"preserve interrupted attempt")
+    monkeypatch.setattr("sys.argv", [*base, "--tasks", "induction_heads"])
+    runner.main()
+    merged = json.loads((root / "comparison.json").read_text())
+    assert merged["complete"]
+    assert merged["config"]["tasks"] == ["simple_copy", "induction_heads"]
+    assert merged["results"][0] == first["results"][0]
+    assert len(merged["results"]) == 2
+    assert checkpoint.read_bytes() == saved_checkpoint
+    assert unfinished.read_bytes() == b"preserve interrupted attempt"
+    assert "attempts" in Path(merged["results"][1]["best_checkpoint"]).parts
+    assert len(merged["invocations"]) == 2
+    assert merged["invocations"][0]["config"] == first["config"]
+    assert merged["config_hash"] == runner._config_hash(merged["config"])
+
+    def unexpected_generation(*args, **kwargs):
+        pytest.fail("Completed task was regenerated")
+    monkeypatch.setattr(runner, "build_data", unexpected_generation)
+    monkeypatch.setattr("sys.argv", [*base, "--tasks", "simple_copy", "induction_heads"])
+    runner.main()
+    assert json.loads((root / "comparison.json").read_text())["results"] == merged["results"]
+    prior = (root / "comparison.json").read_bytes()
+    monkeypatch.setattr("sys.argv", [*base, "--tasks", "simple_copy", "--seed", "999"])
+    with pytest.raises(ValueError, match="seed"):
+        runner.main()
+    assert (root / "comparison.json").read_bytes() == prior
+
+
+def test_legacy_extension_and_incomplete_run_metadata(tmp_path):
+    import json
+    from copy import deepcopy
+    from experiments.train_cogscale import _load_run_state, _save_run_state
+    previous = {"run_id": "old", "config": {"tasks": ["simple_copy"], "models": ["dense", "dual"],
+                                             "seed": 42}, "config_hash": "oldhash",
+                "runtime": {"git": "old"}, "protocol": {}, "tasks": {},
+                "results": [{"task": "simple_copy", "variant": "dense"}]}
+    (tmp_path / "comparison.json").write_text(json.dumps(previous))
+    current = deepcopy(previous)
+    current["config"]["tasks"] = ["induction_heads"]
+    current["runtime"] = {"git": "new"}
+    merged, rows = _load_run_state(tmp_path, current)
+    _save_run_state(tmp_path, merged, rows)
+    saved = json.loads((tmp_path / "comparison.json").read_text())
+    assert not saved["complete"]
+    assert saved["results"] == previous["results"]
+    assert saved["invocations"][0]["runtime"] == {"git": "old"}
+    assert saved["invocations"][1]["runtime"] == {"git": "new"}
+
+
+def test_run_lock_rejects_concurrent_writers(tmp_path):
+    from experiments.train_cogscale import _run_lock
+    with _run_lock(tmp_path):
+        with pytest.raises(RuntimeError, match="Another process"):
+            with _run_lock(tmp_path):
+                pytest.fail("Acquired a second writer lock")
+    with _run_lock(tmp_path):
+        pass
 
 
 def test_overrides_must_apply_to_selected_tasks():

@@ -1,9 +1,8 @@
 """CogScale classification benchmarks with target-only supervision."""
 import argparse
 from contextlib import contextmanager
-from typing import Final
 import hashlib
-import os
+import fcntl
 import platform
 import re
 import subprocess
@@ -24,10 +23,6 @@ from lightning.pytorch.loggers import CSVLogger
 from dsrnn.data.cogscale import TASKS, TASK_SIZE_OPTIONS, build_data, resolve_task_overrides
 from dsrnn.training.cogscale import IMPLEMENTATIONS, MODEL_VARIANTS, RECURRENT_CELLS, CogScaleModule
 from dsrnn.training.scheduler import LRSchedulerConfig
-
-
-# Constants
-_RUN_ID_ENV: Final[str] = "DSRNN_COGSCALE_RUN_ID"
 
 
 # Helpers
@@ -83,27 +78,106 @@ def _git_state() -> dict:
 
 
 def _prepare_run_directory(args: argparse.Namespace):
-    """Allocate one collision-free directory shared by spawned DDP workers."""
+    """Create a run directory or select an existing run for task extension."""
     config = _scientific_config(args)
     fingerprint = _config_hash(config)
-    inherited = os.environ.get(_RUN_ID_ENV)
-    owns_directory = inherited is None
-    if inherited is not None:
-        run_id = inherited
-    elif args.run_id is not None:
+    if args.run_id is not None:
         run_id = args.run_id
     else:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         run_id = f"{timestamp}_{fingerprint}_{uuid.uuid4().hex[:8]}"
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", run_id):
+    if run_id in {".", ".."} or not re.fullmatch(r"[A-Za-z0-9_.-]+", run_id):
         raise ValueError("run_id may contain only letters, numbers, '.', '_' and '-'.")
-    os.environ[_RUN_ID_ENV] = run_id
     run_root = Path(args.log_dir) / run_id
-    if owns_directory:
-        run_root.mkdir(parents=True, exist_ok=False)
-    else:
-        run_root.mkdir(parents=True, exist_ok=True)
+    if run_root.exists() and not any((run_root / name).is_file()
+                                     for name in ("manifest.json", "comparison.json")):
+        raise FileExistsError(f"{run_root} exists without CogScale metadata; choose a new --run_id.")
+    run_root.mkdir(parents=True, exist_ok=True)
     return run_root, run_id, fingerprint, config
+
+
+@contextmanager
+def _run_lock(root):
+    """Hold an exclusive process lock while extending a local run.
+
+    Args:
+        root: Run output directory.
+
+    Yields:
+        None while this process owns the run.
+
+    Raises:
+        RuntimeError: Another process is already writing to this run.
+    """
+    with (root / ".run.lock").open("a") as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"Another process is already using {root}.") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def _load_run_state(root, manifest):
+    """Merge compatible task selections with saved run metadata and results.
+
+    Args:
+        root: Run output directory.
+        manifest: Metadata describing the current invocation.
+
+    Returns:
+        Pair of merged manifest and existing result rows. Previous invocation
+        configurations and runtime metadata are retained in ``invocations``.
+
+    Raises:
+        ValueError: Existing settings or evaluation protocol are incompatible.
+    """
+    path = root / "comparison.json"
+    if not path.exists():
+        path = root / "manifest.json"
+    invocation = {key: manifest[key] for key in ("config", "config_hash", "runtime")}
+    if not path.exists():
+        manifest["invocations"] = [invocation]
+        return manifest, []
+    previous = json.loads(path.read_text())
+    old_config, new_config = previous["config"], manifest["config"]
+    differences = [key for key in sorted(old_config.keys() | new_config.keys())
+                   if key != "tasks" and old_config.get(key) != new_config.get(key)]
+    if differences:
+        raise ValueError("Cannot extend this run with changed settings: "
+                         + ", ".join(differences) + ". Use a new --run_id.")
+    if previous["run_id"] != manifest["run_id"] or previous["protocol"] != manifest["protocol"]:
+        raise ValueError("Saved run identity or evaluation protocol differs; use a new --run_id.")
+    merged_config = {**old_config, "tasks": list(dict.fromkeys(
+        old_config["tasks"] + new_config["tasks"]))}
+    history = previous.get("invocations", [
+        {key: previous[key] for key in ("config", "config_hash", "runtime")}])
+    merged = {key: value for key, value in previous.items()
+              if key not in {"results", "complete"}}
+    merged.update(config=merged_config, config_hash=_config_hash(merged_config),
+                  invocations=[*history, invocation])
+    return merged, previous.get("results", [])
+
+
+def _save_run_state(root, manifest, rows):
+    """Atomically persist metadata and all completed task/model results.
+
+    Args:
+        root: Run output directory, locked by the caller.
+        manifest: Metadata with the cumulative task selection.
+        rows: Completed result rows, including previous invocations.
+    """
+    expected = {(task, model) for task in manifest["config"]["tasks"]
+                for model in manifest["config"]["models"]}
+    completed = {(row["task"], row["variant"]) for row in rows}
+    comparison = {**manifest, "complete": expected <= completed, "results": rows}
+    for name, data in (("manifest.json", manifest), ("comparison.json", comparison)):
+        path = root / name
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(data, indent=2))
+        temporary.replace(path)
 
 
 def _runtime_metadata() -> dict:
@@ -191,7 +265,7 @@ def build_parser():
     parser.add_argument("--devices", type=str, default="1")
     parser.add_argument("--log_dir", type=str, default="_results/cogscale")
     parser.add_argument("--run_id", type=str, default=None,
-                        help="Optional unique run identifier; must not already exist.")
+                        help="Run identifier; existing compatible runs are extended, skipping completed pairs.")
     parser.add_argument("--tasks", nargs="+", choices=TASKS, default=list(TASKS))
     parser.add_argument("--difficulty", choices=["small", "medium", "large"], default="medium")
     parser.add_argument("--sequence_length", type=int, default=None,
@@ -250,8 +324,21 @@ def main():
                              "data": "fixed CogScale splits shared across variants",
                              "early_stopping": False, "readout": "full_post_write_hidden_state"}}
 
-    rows = []
+    with _run_lock(root):
+        manifest, rows = _load_run_state(root, manifest)
+        _save_run_state(root, manifest, rows)
+        _run_tasks(args, root, manifest, rows, overrides, resolved_sizes)
+
+
+def _run_tasks(args, root, manifest, rows, overrides, resolved_sizes):
+    """Train requested task/model pairs that do not have saved result rows."""
+    completed = {(row["task"], row["variant"]) for row in rows}
     for task in args.tasks:
+        pending = [variant for variant in dict.fromkeys(args.models)
+                   if (task, variant) not in completed]
+        if not pending:
+            print(f"Skipping completed CogScale task {task}.", flush=True)
+            continue
         print(f"Generating CogScale {task} ({args.difficulty}), sizes={resolved_sizes[task]}...", flush=True)
         # Get parameters and data for the current task
         start = perf_counter()
@@ -263,12 +350,16 @@ def main():
         manifest["tasks"][task] = {"parameters": params, "category": data["category"],
                                    "input_shape": list(data["X_train"].shape),
                                    "target_shape": list(data["Y_train"].shape)}
-        (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
+        _save_run_state(root, manifest, rows)
         print(f"Generated in {perf_counter() - start:.2f}s; input shape {data['X_train'].shape}", flush=True)
 
-        for variant in args.models:
+        for variant in pending:
             seed_everything(args.seed, workers=True)
             directory = root / task / variant
+            if directory.exists() and any(directory.iterdir()):
+                # A missing result row means the earlier attempt did not finish.
+                # Keep its checkpoints/logs intact and train a fresh attempt.
+                directory = directory / "attempts" / uuid.uuid4().hex[:12]
 
             # Create the model
             module = CogScaleModule(
@@ -292,7 +383,8 @@ def main():
             # Create the trainer and launch the experiment
             checkpoint = ModelCheckpoint(dirpath=directory / "checkpoints", filename="best",
                                          monitor="val/target_ce", mode="min", save_top_k=1)
-            with _experiment_loggers(args, directory, manifest, task, variant) as (loggers, wandb_run):
+            logging_manifest = {**manifest, "runtime": manifest["invocations"][-1]["runtime"]}
+            with _experiment_loggers(args, directory, logging_manifest, task, variant) as (loggers, wandb_run):
                 trainer = Trainer(max_epochs=args.epochs, accelerator=args.accelerator, devices=1,
                                   logger=loggers,
                                   callbacks=[checkpoint, LearningRateMonitor(logging_interval="epoch")])
@@ -324,9 +416,8 @@ def main():
                             counts.append(int((y != -100).any(-1).sum()))
                     row["evaluation"]["cogscale_score"] = sum(s*c for s,c in zip(scores, counts)) / sum(counts)
                 rows.append(row)
-                (root / "comparison.json").write_text(json.dumps({
-                    **manifest, "complete": len(rows) == len(args.tasks) * len(args.models),
-                    "results": rows}, indent=2))
+                completed.add((task, variant))
+                _save_run_state(root, manifest, rows)
                 if wandb_run is not None:
                     wandb_run.summary.update({"result": row, "complete": True})
 

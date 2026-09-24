@@ -4,7 +4,7 @@ from typing import Final, Tuple, Optional, Dict, Iterable, Any
 import cogscale as cog
 
 
-TASKS: Final[Tuple] = ("simple_copy", "selective_copy", "induction_heads", "associative_recall")
+TASKS: Final[Tuple] = ("simple_copy", "selective_copy", "induction_heads", "associative_recall", "adding_problem", "sorting_problem")
 TASK_SIZE_OPTIONS: Final[Tuple] = ("sequence_length", "n_symbols", "delay", "n_markers", "num_pairs")
 
 

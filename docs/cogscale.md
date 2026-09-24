@@ -1,5 +1,29 @@
 # CogScale experiments
 
+## Adding tasks to an existing run
+
+Reuse the same `--log_dir` and `--run_id` with a different `--tasks` selection:
+
+```bash
+python -m experiments.train_cogscale \
+  --config experiments/configs/cogscale_gru.yaml \
+  --run_id development_seed100 --tasks associative_recall --skip_test
+```
+
+Keep the original experiment settings, including seed, difficulty, model list,
+size overrides, epochs, and `--skip_test`. Changes to those settings require
+a new run ID. W&B logging options may change.
+
+Completed task/model pairs are skipped. New results are appended to the shared
+`comparison.json`; the task list and completion flag cover the cumulative run.
+Previous configurations, hashes, and runtime metadata are retained under
+`invocations`. Existing runs created before this extension are supported.
+If a pair has files but no completed result row, it is trained again from
+scratch in a new `attempts/` subdirectory, preserving the interrupted files.
+This does not resume optimizer state or add test evaluation to completed rows.
+Concurrent writers to the same run are rejected. Omit `--run_id` for a fresh
+automatically named run.
+
 `experiments/train_cogscale.py` orchestrates runs, CLI/YAML configuration,
 checkpoint selection, and reporting. `dsrnn/data/cogscale.py` owns data
 generation, preset resolution, and override validation;
