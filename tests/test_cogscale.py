@@ -138,12 +138,12 @@ def test_invalid_sizes_fail_without_mutating_presets(task, overrides):
 
 
 def test_yaml_sizes_and_cli_override(tmp_path, monkeypatch):
-    from experiments.train_cogscale import build_parser, _load_config
+    from experiments.train_cogscale import build_parser, load_config
     config = tmp_path / "sizes.yaml"
     config.write_text("difficulty: small\nsequence_length: 8\nn_symbols: 5\ndelay: null\n")
     monkeypatch.setattr("sys.argv", ["train_cogscale", "--config", str(config),
                                      "--n_symbols", "6"])
-    args = _load_config(build_parser())
+    args = load_config(build_parser())
     assert (args.difficulty, args.sequence_length, args.n_symbols, args.delay) == (
         "small", 8, 6, None)
 
@@ -199,7 +199,7 @@ def test_extend_existing_run_preserves_results_and_skips_completed(tmp_path, mon
     assert "attempts" in Path(merged["results"][1]["best_checkpoint"]).parts
     assert len(merged["invocations"]) == 2
     assert merged["invocations"][0]["config"] == first["config"]
-    assert merged["config_hash"] == runner._config_hash(merged["config"])
+    assert merged["config_hash"] == runner.config_hash(merged["config"])
 
     def unexpected_generation(*args, **kwargs):
         pytest.fail("Completed task was regenerated")
@@ -255,20 +255,20 @@ def test_overrides_must_apply_to_selected_tasks():
 
 
 def test_wandb_flags_do_not_change_scientific_hash(tmp_path, monkeypatch):
-    from experiments.train_cogscale import build_parser, _scientific_config, _load_config
+    from experiments.train_cogscale import build_parser, scientific_config, load_config
     parser = build_parser()
-    assert _scientific_config(parser.parse_args([])) == _scientific_config(
+    assert scientific_config(parser.parse_args([])) == scientific_config(
         parser.parse_args(["--wandb", "--wandb_project", "example", "--wandb_mode", "offline"]))
     config = tmp_path / "logging.yaml"
     config.write_text("wandb: true\n")
     monkeypatch.setattr("sys.argv", ["train_cogscale", "--config", str(config), "--no-wandb"])
-    assert _load_config(parser).wandb is False
+    assert load_config(parser).wandb is False
 
 
 def test_wandb_lifecycle_and_metadata(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace
-    from experiments.train_cogscale import build_parser, _experiment_loggers
+    from experiments.train_cogscale import build_parser, experiment_loggers
     args = build_parser().parse_args(["--wandb", "--wandb_mode", "offline"])
     runs = []
     def init(**kwargs):
@@ -281,12 +281,12 @@ def test_wandb_lifecycle_and_metadata(tmp_path, monkeypatch):
     manifest = {"config": {"seed": 42}, "run_id": "example", "config_hash": "hash",
                 "runtime": {}, "protocol": {}, "tasks": {"simple_copy": {"parameters": {"delay": 3}}}}
     for variant in ("dense", "dual"):
-        with _experiment_loggers(args, tmp_path, manifest, "simple_copy", variant) as (loggers, run):
+        with experiment_loggers(args, tmp_path, manifest, "simple_copy", variant) as (loggers, run):
             assert len(loggers) == 2
             assert run.config["task_metadata"]["parameters"]["delay"] == 3
             assert run.config["variant"] == variant
     assert len(runs) == 2 and all(run.codes == [0] for run in runs)
     with pytest.raises(RuntimeError, match="training failed"):
-        with _experiment_loggers(args, tmp_path, manifest, "simple_copy", "dual"):
+        with experiment_loggers(args, tmp_path, manifest, "simple_copy", "dual"):
             raise RuntimeError("training failed")
     assert runs[-1].codes == [1]

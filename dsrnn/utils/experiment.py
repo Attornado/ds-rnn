@@ -12,7 +12,7 @@ import yaml
 from lightning.pytorch.loggers import CSVLogger
 
 
-def _load_config(parser: argparse.ArgumentParser) -> argparse.Namespace:
+def load_config(parser: argparse.ArgumentParser) -> argparse.Namespace:
     args = parser.parse_args()
     if args.config is None:
         return args
@@ -28,7 +28,7 @@ def _load_config(parser: argparse.ArgumentParser) -> argparse.Namespace:
     return args
 
 
-def _devices(value: str):
+def devices(value: str):
     if value == "auto":
         return "auto"
     if "," in value:
@@ -36,19 +36,19 @@ def _devices(value: str):
     return int(value)
 
 
-def _scientific_config(args: argparse.Namespace) -> dict:
+def scientific_config(args: argparse.Namespace) -> dict:
     """Return the effective settings that can affect experiment results."""
     return {key: value for key, value in vars(args).items()
             if key not in {"config", "log_dir", "run_id"}
             and not key.startswith("wandb")}
 
 
-def _config_hash(config: dict) -> str:
+def config_hash(config: dict) -> str:
     encoded = json.dumps(config, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:12]
 
 
-def _git_state() -> dict:
+def git_state() -> dict:
     """Capture source revision metadata without making Git a runtime requirement."""
     repository = Path(__file__).resolve().parents[2]
     try:
@@ -63,19 +63,19 @@ def _git_state() -> dict:
     return {"revision": revision, "dirty": dirty}
 
 
-def _runtime_metadata() -> dict:
+def runtime_metadata() -> dict:
     return {
         "python": platform.python_version(),
         "torch": torch.__version__,
         "cuda_runtime": torch.version.cuda,
         "cuda_available": torch.cuda.is_available(),
         "float32_matmul_precision": torch.get_float32_matmul_precision(),
-        "git": _git_state(),
+        "git": git_state(),
     }
 
 
 @contextmanager
-def _experiment_loggers(args, directory, manifest, task, variant):
+def experiment_loggers(args, directory, manifest, task, variant):
     """Provide CSV and optional W&B loggers for one task/model pair.
 
     Args:

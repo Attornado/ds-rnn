@@ -17,8 +17,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from dsrnn.data.classification import SequentialMNISTDataModule
 from dsrnn.data.lra import CIFAR10SeqDataModule
 from dsrnn.utils.experiment import (
-    _load_config, _devices, _scientific_config, _config_hash,
-    _runtime_metadata, _experiment_loggers,
+    load_config, devices, scientific_config, config_hash,
+    runtime_metadata, experiment_loggers,
 )
 from dsrnn.nn.cells.dual_read_write import DualReadWriteRNNCell, SparseDualReadWriteRNNCell
 from dsrnn.nn.cells.dual_read_write_gru import DualReadWriteGRUCell, SparseDualReadWriteGRUCell
@@ -301,12 +301,12 @@ def _save_json(path, data):
 def main():
     torch.set_float32_matmul_precision("medium")
     parser = build_parser()
-    args = _load_config(parser)
+    args = load_config(parser)
     # YAML values go through the same choice checks as CLI values.
     for action in parser._actions:
         if action.choices and getattr(args, action.dest) not in action.choices:
             parser.error(f"Invalid {action.dest}: {getattr(args, action.dest)!r}.")
-    if _devices(str(args.devices)) != 1:
+    if devices(str(args.devices)) != 1:
         parser.error("Pixel runner currently requires --devices 1.")
     if min(args.epochs, args.batch_size, args.hidden_size, args.router_context_size) < 1:
         parser.error("Epochs, batch size, hidden size, and router context size must be positive.")
@@ -325,8 +325,8 @@ def main():
             parser.error("W&B logging requires the optional dependency: pip install '.[wandb]'.")
 
     seed_everything(args.seed, workers=True)
-    config = _scientific_config(args)
-    fingerprint = _config_hash(config)
+    config = scientific_config(args)
+    fingerprint = config_hash(config)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     run_id = args.run_id or f"{timestamp}_{fingerprint}_{uuid.uuid4().hex[:8]}"
     if run_id in {".", ".."} or not re.fullmatch(r"[A-Za-z0-9_.-]+", run_id):
@@ -336,7 +336,7 @@ def main():
     directory = root / args.task / args.model
     manifest = {
         "run_id": run_id, "config_hash": fingerprint, "config": config,
-        "runtime": _runtime_metadata(),
+        "runtime": runtime_metadata(),
         "protocol": {"monitor": "val/loss", "score": "accuracy",
                      "loss": "final_state_cross_entropy", "early_stopping": False,
                      "readout": "full_post_write_hidden_state",
@@ -362,7 +362,7 @@ def main():
             interval="epoch", frequency=1, monitor="val/loss"))
     checkpoint = ModelCheckpoint(dirpath=directory / "checkpoints", filename="best",
                                  monitor="val/loss", mode="min", save_top_k=1)
-    with _experiment_loggers(args, directory, manifest, args.task, args.model) as (loggers, wandb_run):
+    with experiment_loggers(args, directory, manifest, args.task, args.model) as (loggers, wandb_run):
         trainer = Trainer(max_epochs=args.epochs, accelerator=args.accelerator, devices=1,
                           logger=loggers,
                           callbacks=[checkpoint, LearningRateMonitor(logging_interval="epoch")])

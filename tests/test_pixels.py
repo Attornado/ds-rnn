@@ -96,7 +96,7 @@ def test_yaml_cli_precedence(tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     config.write_text("task: psMNIST\nmodel: dense\nhidden_size: 16\nwandb: true\n")
     monkeypatch.setattr("sys.argv", ["pixels", "--config", str(config), "--hidden_size", "8", "--no-wandb"])
-    args = runner._load_config(runner.build_parser())
+    args = runner.load_config(runner.build_parser())
     assert (args.task, args.model, args.hidden_size, args.wandb) == ("psMNIST", "dense", 8, False)
 
 

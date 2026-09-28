@@ -17,17 +17,15 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from dsrnn.data.cogscale import TASKS, TASK_SIZE_OPTIONS, build_data, resolve_task_overrides
 from dsrnn.training.cogscale import IMPLEMENTATIONS, MODEL_VARIANTS, RECURRENT_CELLS, CogScaleModule
 from dsrnn.training.scheduler import LRSchedulerConfig
-from dsrnn.utils.experiment import (
-    _load_config, _devices, _scientific_config, _config_hash,
-    _runtime_metadata, _experiment_loggers,
-)
+from dsrnn.utils.experiment import load_config, devices, scientific_config, config_hash, runtime_metadata, \
+    experiment_loggers
 
 
 # Helpers
 def _prepare_run_directory(args: argparse.Namespace):
     """Create a run directory or select an existing run for task extension."""
-    config = _scientific_config(args)
-    fingerprint = _config_hash(config)
+    config = scientific_config(args)
+    fingerprint = config_hash(config)
     if args.run_id is not None:
         run_id = args.run_id
     else:
@@ -103,7 +101,7 @@ def _load_run_state(root, manifest):
         {key: previous[key] for key in ("config", "config_hash", "runtime")}])
     merged = {key: value for key, value in previous.items()
               if key not in {"results", "complete"}}
-    merged.update(config=merged_config, config_hash=_config_hash(merged_config),
+    merged.update(config=merged_config, config_hash=config_hash(merged_config),
                   invocations=[*history, invocation])
     return merged, previous.get("results", [])
 
@@ -185,9 +183,9 @@ def main():
 
     # Load arguments and logger
     parser = build_parser()
-    args = _load_config(parser)
+    args = load_config(parser)
 
-    if _devices(args.devices) != 1:
+    if devices(args.devices) != 1:
         parser.error("CogScale runner currently requires --devices 1.")
     if min(args.n_train, args.n_val, args.n_test, args.epochs, args.batch_size) < 1:
         parser.error("Split sizes, epochs, and batch size must be positive.")
@@ -207,7 +205,7 @@ def main():
     args.loss = "target_cross_entropy"
     root, run_id, fingerprint, config = _prepare_run_directory(args)
     manifest = {"run_id": run_id, "config_hash": fingerprint, "config": config,
-                "runtime": _runtime_metadata(), "tasks": {},
+                "runtime": runtime_metadata(), "tasks": {},
                 "protocol": {"monitor": "val/target_ce", "score": "cogscale_error_rate",
                              "mask": "any target channel != -100",
                              "data": "fixed CogScale splits shared across variants",
@@ -273,7 +271,7 @@ def _run_tasks(args, root, manifest, rows, overrides, resolved_sizes):
             checkpoint = ModelCheckpoint(dirpath=directory / "checkpoints", filename="best",
                                          monitor="val/target_ce", mode="min", save_top_k=1)
             logging_manifest = {**manifest, "runtime": manifest["invocations"][-1]["runtime"]}
-            with _experiment_loggers(args, directory, logging_manifest, task, variant) as (loggers, wandb_run):
+            with experiment_loggers(args, directory, logging_manifest, task, variant) as (loggers, wandb_run):
                 trainer = Trainer(max_epochs=args.epochs, accelerator=args.accelerator, devices=1,
                                   logger=loggers,
                                   callbacks=[checkpoint, LearningRateMonitor(logging_interval="epoch")])
