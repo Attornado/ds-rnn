@@ -1,7 +1,7 @@
 # DS-RNN: Dynamic Sparse Recurrent Neural Networks
 
 Official implementation of *"DS-RNNs: Conditional Computation in Recurrent
-Models via Input-Dependent Sparse Gating"* (under review at TMLR).
+Models via Input-Dependent Sparse Gating"* (published in TMLR: https://openreview.net/forum?id=8LkOGzFcVL&).
 
 DS-RNNs equip recurrent architectures (LSTM, GRU, LTC) and state-space models
 (S4, Liquid-S4) with a lightweight **router** that selects, for each input, a
