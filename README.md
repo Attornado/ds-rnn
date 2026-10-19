@@ -40,7 +40,7 @@ By operating on compact dense submatrices, DS-RNNs reduce computational cost whi
 <p align="center">
   <img src="figures/figure2a-performance.png"
        alt="Figure 2(a): DS-RNN versus dense models, RigL, and DeltaRNN at 90% sparsity"
-       width="950"/>
+       width="700"/>
 </p>
 
 ### Multi-Task Robustness and Subnetwork Specialization
@@ -48,7 +48,7 @@ By operating on compact dense submatrices, DS-RNNs reduce computational cost whi
 <p align="center">
   <img src="figures/figure2bd-multitask.png"
        alt="Figures 2(b) and 2(d): multi-task regression, gradient similarity, and subnetwork overlap"
-       width="850"/>
+       width="400"/>
 </p>
 
 ### Computational Efficiency
@@ -56,7 +56,7 @@ By operating on compact dense submatrices, DS-RNNs reduce computational cost whi
 <p align="center">
   <img src="figures/figure3-efficiency.png"
        alt="Figure 3: FLOPs and measured runtime for dense LSTM and DS-LSTM on an RTX 4090"
-       width="950"/>
+       width="600"/>
 </p>
 
 Full experimental results, configurations, and analysis are in the [paper](https://openreview.net/forum?id=8LkOGzFcVL).
