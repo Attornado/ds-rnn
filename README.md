@@ -3,6 +3,8 @@
 Official implementation of *"DS-RNNs: Conditional Computation in Recurrent
 Models via Input-Dependent Sparse Gating"* (published in TMLR: https://openreview.net/forum?id=8LkOGzFcVL&).
 
+![alt text](https://github.com/Attornado/ds-rnn/blob/tmlr2026/fugure1-method-1.png?raw=true)
+
 DS-RNNs equip recurrent architectures (LSTM, GRU, LTC) and state-space models (S4, Liquid-S4) with a lightweight **router** that selects, for each input, a small subnetwork of input and hidden channels that participates in the recurrent update. Because the masks are structured, the sparse recurrent matmuls become dense operations on active submatrices, which map onto standard batched GEMM kernels and yield real FLOPs and wall-clock savings on commodity hardware, with no specialized sparse primitives.
 
 At 90% sparsity, DS-RNNs largely match (and sometimes exceed) dense performance across LSTM, GRU, LTC, and S4 backbones, and match or outperform RigL and
