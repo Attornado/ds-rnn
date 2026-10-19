@@ -3,20 +3,10 @@
 Official implementation of *"DS-RNNs: Conditional Computation in Recurrent
 Models via Input-Dependent Sparse Gating"* (published in TMLR: https://openreview.net/forum?id=8LkOGzFcVL&).
 
-DS-RNNs equip recurrent architectures (LSTM, GRU, LTC) and state-space models
-(S4, Liquid-S4) with a lightweight **router** that selects, for each input, a
-small subnetwork of input and hidden channels that participates in the
-recurrent update. Because the masks are **structured** — entire channels, not
-individual weights — the sparse recurrent matmuls become dense operations on
-active submatrices, which map onto standard batched GEMM kernels and yield
-real FLOPs and wall-clock savings on commodity hardware, with no specialized
-sparse primitives.
+DS-RNNs equip recurrent architectures (LSTM, GRU, LTC) and state-space models (S4, Liquid-S4) with a lightweight **router** that selects, for each input, a small subnetwork of input and hidden channels that participates in the recurrent update. Because the masks are structured, the sparse recurrent matmuls become dense operations on active submatrices, which map onto standard batched GEMM kernels and yield real FLOPs and wall-clock savings on commodity hardware, with no specialized sparse primitives.
 
-At 90% sparsity, DS-RNNs largely match (and sometimes exceed) dense performance
-across LSTM, GRU, LTC, and S4 backbones, and match or outperform RigL and
-DeltaRNN baselines. Because different inputs activate largely disjoint
-subnetworks, gradient interference is reduced — which improves multi-task and
-continual learning.
+At 90% sparsity, DS-RNNs largely match (and sometimes exceed) dense performance across LSTM, GRU, LTC, and S4 backbones, and match or outperform RigL and
+DeltaRNN baselines. Because different inputs activate largely disjoint subnetworks, gradient interference is reduced — which improves multi-task and continual learning.
 
 ## Highlights
 
